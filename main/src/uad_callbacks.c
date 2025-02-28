@@ -170,6 +170,15 @@ void usb_headset_init(void)
     s_mic_bytes_ms = sampFreq / 1000 * s_mic_resolution * CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_TX/ 8;
 }
 
+uint16_t usb_read_data (void* buffer, uint16_t bufsize)
+{
+    if(tud_audio_available() > bufsize){
+        return tud_audio_read(buffer, bufsize);
+    }
+    else
+        return 0;
+
+}
 
 //--------------------------------------------------------------------+
 // Application Callback API Implementations
@@ -570,7 +579,7 @@ bool tud_audio_set_req_entity_cb(uint8_t rhport, tusb_control_request_t const *p
             mic_gain[0] =  (mic_mute[0] || mic_mute[1]) ? 0 : mul_8p24x8p24 (gain_table[mic_volume[0]],gain_table[mic_volume[1]]);
             mic_gain[1] =  (mic_mute[0] || mic_mute[2]) ? 0 : mul_8p24x8p24 (gain_table[mic_volume[0]],gain_table[mic_volume[2]]);
             TU_LOG2("    Set mic Mute: %d of channel: %u\r\n", mic_mute[channelNum], channelNum);
-            //ESP_LOGI(TAG,"    Set mic Mute: %d of channel: %u (%s)", mic_mute[channelNum], channelNum, CHNL_STR(channelNum));
+            ESP_LOGI(TAG,"    Set mic Mute: %d of channel: %u (%s)", mic_mute[channelNum], channelNum, CHNL_STR(channelNum));
             //ESP_LOGI(TAG,"     mic_gain: %ld, %ld", mic_gain[0],mic_gain[1]);
             return true;
 

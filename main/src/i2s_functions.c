@@ -10,17 +10,6 @@
 
 //#define DUMMY_I2S 1
 
-/* 
-    Knowles SPH0645 I2S mic's data are MSB aligned 24 bits in a 32-bit word,
-    whose lower 6 bits are always 0.
-    Optional GAIN amount is considered in determining amount of right-shift
-    on the raw data to extract 16 bits. 
-    The data has signnficant offset, which is removed by a offset canceller filter.
-
-    The function here hardcodes 2-ch 16bit configuration of final data.
-*/
-
-
 //#define I2S_EXTERNAL_LOOPBACK
 
 #ifdef I2S_EXTERNAL_LOOPBACK
@@ -158,7 +147,10 @@ esp_err_t bsp_i2s_reconfig(uint32_t sample_rate)
 */
 #define  FILTER_RESPONSE_MULTIPLIER 2
 #define  BIT_MASK ((0xFFFFFFFFUL)<<(32-MIC_RESOLUTION))
-/* Call with reset=True once to initialize the filter OR when no offset cancellation is required */
+/* For highpass filtering (offset cancellation) call with reset=True once to initialize the 
+   filter and with reset=false for subsequet calls. If no offset cancellation is required,
+   call this function with reset=true all the times.
+*/
 void decode_and_cancel_offset(int32_t *left_sample_p, int32_t *right_sample_p, bool reset)
 {
     static int32_t l_offset = 0;  // offset for L channel; (state of the filter)
@@ -174,7 +166,6 @@ void decode_and_cancel_offset(int32_t *left_sample_p, int32_t *right_sample_p, b
         if((*left_sample_p >> (32-MIC_RESOLUTION))> 32767 || (*left_sample_p >> (32 - MIC_RESOLUTION))< -32768){
         //    printf("left sample clips before offset\n");
         }
-        //final_value = *left_sample_p - (l_offset & (int32_t)(-1 << (32-MIC_RESOLUTION)));
         final_value = (*left_sample_p & BIT_MASK) - (l_offset & BIT_MASK);
         *left_sample_p = mul_1p31x8p24(final_value,mic_gain[0]);
         l_offset += (*left_sample_p) << FILTER_RESPONSE_MULTIPLIER;
@@ -186,7 +177,6 @@ void decode_and_cancel_offset(int32_t *left_sample_p, int32_t *right_sample_p, b
         if((*right_sample_p >> (32-MIC_RESOLUTION))> 32767 || (*right_sample_p >> (32 - MIC_RESOLUTION))< -32768){
         //    printf("right sample clips before offset\n");
         }
-        //final_value = *right_sample_p - (r_offset & (int32_t)(-1 << (32-MIC_RESOLUTION)));
         final_value = (*right_sample_p & BIT_MASK)  - (r_offset & BIT_MASK);
         *right_sample_p = mul_1p31x8p24(final_value,mic_gain[1]);
         r_offset += (*right_sample_p) << FILTER_RESPONSE_MULTIPLIER;
@@ -316,8 +306,6 @@ size_t bsp_i2s_read(void *data_buf, size_t count)
 }
 #endif
 
-//static int16_t data_dump[8192];
-
 /*
   This function formats the data (16 bits to MSB aligned 32 bits etc..) using a local buffer
   tx_sample_buf and writes to the I2S DMA buffer to be sent out over I2S.
@@ -350,7 +338,7 @@ void bsp_i2s_write(void *data_buf, size_t n_bytes){
             // copy the same data to both channels. NOTE This will depend on how the speaker is wired to I2S bus
             *dst++ = data;
       }
-      assert(dst <= &tx_sample_buf[CFG_TUD_AUDIO_FUNC_1_EP_OUT_SW_BUF_SZ/2-1]);
+      //assert(dst <= &tx_sample_buf[CFG_TUD_AUDIO_FUNC_1_EP_OUT_SW_BUF_SZ/2-1]);
 
       if(CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_RX == 1 /* single channel*/) {
         // total number of bytes in tx_sample_buf is count*4 since each 16bit sample in data_buf
@@ -396,16 +384,29 @@ uint16_t (*i2s_get_data)(void *data_buf, uint16_t count);
 */
 extern size_t s_spk_bytes_ms;
 
+/* This function reads USB EPOUT fifo and writes to I2S tx DMA. Before reading the EPOUT
+   fifo, it is made sure that a mutiple of a frame's woth bytes (4 bytes for stereo) are
+   available in the fifo. Normally, we would expect a mS worth bytes are available but it
+   is not insisted on - only a warning is issued.
+   Data are put through a gain stage before calling a formatting cum writing function 
+   to I2S TX channel.
+*/
+
 void i2s_transmit() {
-        data_out_buf_cnt = (*i2s_get_data)(data_out_buf, s_spk_bytes_ms);
+    uint16_t n_bytes = tud_audio_available();
+    if(n_bytes != ((n_bytes>>CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_RX)<<CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_RX)) {
+        ESP_LOGI(TAG,"tud_audio_read returned %d bytes (not multiples of one frame worth bytes)", n_bytes);
+        vTaskDelay(pdMS_TO_TICKS(1));
+        return;
+    }    
+        data_out_buf_cnt = tud_audio_read(data_out_buf, n_bytes);
         if (data_out_buf_cnt < s_spk_bytes_ms) {
             ESP_LOGI(TAG,"Only %d bytes available; expecting >= %d bytes",data_out_buf_cnt,s_spk_bytes_ms);
-        //    //vTaskDelay(2);
-        //    //continue ;
+            vTaskDelay(pdMS_TO_TICKS(1));
         }   
 
         // make sure that data_out_buf_cnt is a multiple of 2*CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_RX
-        if(data_out_buf_cnt != ((data_out_buf_cnt>>(2*CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_RX))<<(2*CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_RX)))
+        if(data_out_buf_cnt != ((data_out_buf_cnt>>CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_RX)<<CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_RX))
         {
             ESP_LOGI(TAG,"tud_audio_read returned %d bytes (not multiples of one frame worth bytes)", data_out_buf_cnt);
         }    
@@ -418,7 +419,7 @@ void i2s_transmit() {
         if(data_out_buf_cnt > 0)
             bsp_i2s_write(data_out_buf, data_out_buf_cnt);
         else
-            vTaskDelay(10/portTICK_PERIOD_MS);
+            vTaskDelay(pdMS_TO_TICKS(1));
 }
 
 /* This function is meant to be run as a task. It repeatedly calls a producer 

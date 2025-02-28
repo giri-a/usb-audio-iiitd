@@ -5,5 +5,7 @@
     "idf.openOcdConfigs": [
         "board/esp32s3-builtin.cfg"
     ],
-    "idf.toolsPath": "/Users/jeet/esp-idf-tools"
+    "idf.toolsPath": "/Users/jeet/esp-idf-tools",
+    "idf.flashType": "UART",
+    "idf.port": "/dev/tty.wchusbserial56910085151"
 }
