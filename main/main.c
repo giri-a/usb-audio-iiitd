@@ -113,6 +113,7 @@ void app_main()
     }
     ESP_LOGI(TAG, "TinyUSB initialized");
 
+/*
     ret_val = xTaskCreatePinnedToCore(i2s_consumer_func, "i2s_consumer_func", 4*1024, (void*)& s_spk_active, 1, &spk_task_handle, 1);
     if (ret_val != pdPASS) {
         ESP_LOGE(TAG, "Failed to create i2s_read_write_task");
@@ -120,7 +121,7 @@ void app_main()
         return;
     }
     ESP_LOGI(TAG, "I2S started");
-
+*/
     configure_led();
 
     blink_state = BLINK_NOT_MOUNTED;
@@ -133,6 +134,7 @@ void app_main()
 
         // led_blinking_task();
         drive_led();
-         vTaskDelay(pdMS_TO_TICKS(50));
+        i2s_transmit();
+        //vTaskDelay(pdMS_TO_TICKS(50));
     } 
 }

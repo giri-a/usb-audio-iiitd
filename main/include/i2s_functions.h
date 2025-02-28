@@ -18,6 +18,7 @@ void bsp_i2s_write(void *data_buf, size_t count);
 void decode_and_cancel_offset(int32_t *left_sample_p, int32_t *right_sample_p, bool reset);
 void i2s_read_write_task();
 extern uint16_t (*i2s_get_data)(void *data_buf, uint16_t count);
-void i2s_consumer_func();
+void i2s_consumer_func_task();
+void i2s_transmit();
 
 #endif

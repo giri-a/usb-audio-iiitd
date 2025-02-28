@@ -396,12 +396,37 @@ uint16_t (*i2s_get_data)(void *data_buf, uint16_t count);
 */
 extern size_t s_spk_bytes_ms;
 
+void i2s_transmit() {
+        data_out_buf_cnt = (*i2s_get_data)(data_out_buf, s_spk_bytes_ms);
+        if (data_out_buf_cnt < s_spk_bytes_ms) {
+            ESP_LOGI(TAG,"Only %d bytes available; expecting >= %d bytes",data_out_buf_cnt,s_spk_bytes_ms);
+        //    //vTaskDelay(2);
+        //    //continue ;
+        }   
+
+        // make sure that data_out_buf_cnt is a multiple of 2*CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_RX
+        if(data_out_buf_cnt != ((data_out_buf_cnt>>(2*CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_RX))<<(2*CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_RX)))
+        {
+            ESP_LOGI(TAG,"tud_audio_read returned %d bytes (not multiples of one frame worth bytes)", data_out_buf_cnt);
+        }    
+        speaker_amp((int16_t *)data_out_buf, data_out_buf_cnt/(2*CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_RX), spk_gain);
+
+#ifdef DISPLAY_STATS
+        spk_bytes_available_ary[data_out_buf_cnt]++;
+#endif
+
+        if(data_out_buf_cnt > 0)
+            bsp_i2s_write(data_out_buf, data_out_buf_cnt);
+        else
+            vTaskDelay(10/portTICK_PERIOD_MS);
+}
+
 /* This function is meant to be run as a task. It repeatedly calls a producer 
     function (i2s_get_data()) to get data and sends it along to I2S DMA.
     The 'active' flag is to force the loop to introduce a delay. Otherwise, 
     the loop spins too fast without a break and trips the watchdog timer.
 */
-void i2s_consumer_func(bool *active){
+void i2s_consumer_func_task(bool *active){
 
     /* running flag is used to delay the start of reading the producer FIFOs. 
        Without a delay (*i2s_get_data)() starts reading the FIFO immediately
@@ -425,26 +450,6 @@ void i2s_consumer_func(bool *active){
             vTaskDelay(50/portTICK_PERIOD_MS);
             running = true;
         }
-
-        data_out_buf_cnt = (*i2s_get_data)(data_out_buf, s_spk_bytes_ms);
-        if (data_out_buf_cnt < s_spk_bytes_ms) {
-            ESP_LOGI(TAG,"Only %d bytes available; expecting >= %d bytes",data_out_buf_cnt,s_spk_bytes_ms);
-        //    //vTaskDelay(2);
-        //    //continue ;
-        }   
-
-        // make sure that data_out_buf_cnt is a multiple of 2*CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_RX
-        if(data_out_buf_cnt != ((data_out_buf_cnt>>(2*CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_RX))<<(2*CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_RX)))
-        {
-            ESP_LOGI(TAG,"tud_audio_read returned %d bytes (not multiples of one frame worth bytes)", data_out_buf_cnt);
-        }    
-        speaker_amp((int16_t *)data_out_buf, data_out_buf_cnt/(2*CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_RX), spk_gain);
-
-#ifdef DISPLAY_STATS
-        spk_bytes_available_ary[data_out_buf_cnt]++;
-#endif
-
-        if(data_out_buf_cnt > 0)
-            bsp_i2s_write(data_out_buf, data_out_buf_cnt);
+        i2s_transmit();
     }
 }
