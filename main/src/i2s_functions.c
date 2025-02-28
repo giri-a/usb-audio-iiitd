@@ -394,7 +394,7 @@ extern size_t s_spk_bytes_ms;
 
 void i2s_transmit() {
     uint16_t n_bytes = tud_audio_available();
-    if(n_bytes != ((n_bytes>>CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_RX)<<CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_RX)) {
+    if(n_bytes == 0 || n_bytes != ((n_bytes>>CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_RX)<<CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_RX)) {
         ESP_LOGI(TAG,"tud_audio_read returned %d bytes (not multiples of one frame worth bytes)", n_bytes);
         vTaskDelay(pdMS_TO_TICKS(1));
         return;
