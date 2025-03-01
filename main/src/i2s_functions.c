@@ -240,9 +240,9 @@ size_t bsp_i2s_read(uint16_t *data_buf, size_t count)
 /*
   This function is called by tud_audio_tx_done_post_load_cb(). 
   It reads 32bits raw data for both left and right channels from I2S DMA buffers, 
-  gets upper 18bits LSB aligned. After offset cancellation, 16 lower bits are 
-  returned in data_buf. count is the requested number of bytes. Actual number of
-  bytes read is returned.
+  gets upper 24bits LSB aligned. After amplification, 16 bits are returned in 
+  data_buf. count is the requested number of bytes. Actual number of bytes read is 
+  returned.
 */
 size_t bsp_i2s_read(void *data_buf, size_t count)
 {
@@ -351,6 +351,7 @@ void bsp_i2s_write(void *data_buf, size_t n_bytes){
         // total number of bytes in tx_sample_buf is count*2 since each 16bit sample in data_buf
         // made into a 32bit value.
 
+        log_txbytes(n_bytes*2);
         ESP_ERROR_CHECK(i2s_channel_write(tx_handle,tx_sample_buf, n_bytes*2, &num_bytes, 200)) ;
 
       }

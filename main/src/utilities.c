@@ -1,4 +1,9 @@
 #include <math.h>
+#include "esp_log.h"
+#include "FreeRTOS.h"
+#include "freertos/queue.h"
+
+char *TAG = "utilities";
 
 int32_t q31_multiply(int32_t a, int32_t b){
     // Q31 format numbers are assumed to be in 1.31 format (ranges from -1 to 0.99999)
@@ -58,4 +63,68 @@ int16_t mul_1p31x8p24(int32_t sig, int32_t gain)
 
     t = t<<8;
     return *(p+3);
+}
+
+/*=============== queue code used for debug ===============*/
+struct tx_data_info
+{
+ uint32_t timestamp;
+ size_t   n_bytes;
+} typedef txPacketInfo;
+
+QueueHandle_t txInfoQ;
+
+// Task to create a queue and post a value.
+void txInfoQinit( )
+{
+
+ // Create a queue capable of containing 1024 txPacketInfo
+ // These should be passed by pointer as they contain a lot of data.
+ txInfoQ = xQueueCreate( 1024, sizeof( struct tx_data_info ) );
+ if( txInfoQ == 0 )
+ {
+     ESP_LOGE(TAG,"Failed to create Queue");
+ }
+
+}
+ // this keep writing to the queue discarding older items so that we
+ // can get a snapshot of most recent elements in the queue
+void put_txPacketInfo(txPacketInfo *data)
+{
+ char buf[sizeof(txPacketInfo)];
+ if(xQueueSend( txInfoQ, ( void * ) data, ( TickType_t ) 0 ) == pdFALSE){
+    // if a send failed, queue may be full. In that case, remove an item and try again
+    xQueueReceive(txInfoQ, buf, (TickType_t)0);
+    if(xQueueSend( txInfoQ, ( void * ) data, ( TickType_t ) 0 ) == pdFALSE){
+        // it failed again; so bail out
+        ESP_LOGE(TAG,"Failed to send data to queue");
+    }
+
+ }
+
+}
+
+void print_txPacketInfo(size_t n_items){
+ char buf[sizeof(txPacketInfo)];
+ txPacketInfo *p;
+    if(n_items == 0) n_items = 1024;
+    printf("==== Tx packets info =====\n");
+    printf("  timestamp : n_bytes \n");
+    for(size_t i=0; i<n_items; i++){
+        if(xQueueReceive(txInfoQ, buf, (TickType_t)0) == pdTRUE){
+            p = (txPacketInfo*)buf;
+            printf("%ld : %d\n",p->timestamp,p->n_bytes);
+        }
+        else {
+            return;
+        }
+    }
+}
+
+
+void log_txbytes(size_t n_bytes){
+    txPacketInfo s;
+    s.timestamp = esp_log_timestamp();
+    s.n_bytes = n_bytes;
+    put_txPacketInfo(&s);
 }

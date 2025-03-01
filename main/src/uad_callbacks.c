@@ -33,7 +33,7 @@ extern uint32_t blink_state;
 
 size_t (*usb_get_data)(void *data_buf, size_t count);
 
-extern TaskHandle_t spk_task_handle; 
+//extern TaskHandle_t spk_task_handle; 
 
 // Speaker and microphone status
 volatile bool s_spk_active = false;

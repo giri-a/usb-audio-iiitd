@@ -15,6 +15,7 @@
 #include "uad_callbacks.h"
 #include "driver/gpio.h"
 #include "blink.h"
+#include "utilities.h"
 
 static const char *TAG = "main";
 
@@ -44,9 +45,10 @@ int16_t data_out_buf[I2S_DATA_OUT_BUFSIZ] = {0};
 
 // end extern variables declared in data_buffers.h
 
-TaskHandle_t spk_task_handle = NULL; 
 TaskHandle_t usb_device_task_handle = NULL; 
 
+/*
+TaskHandle_t spk_task_handle = NULL; 
 #define GPIO_OUTPUT_PIN_SEL  ((1ULL<<GPIO_NUM_7) |\
                               (1ULL<<GPIO_NUM_8) |\
                               (1ULL<<GPIO_NUM_9) |\
@@ -69,6 +71,7 @@ void init_gpio()
     //configure GPIO with the given settings
     gpio_config(&io_conf);
 }
+*/
 void print_task_stats();
 void app_main()
 {
@@ -86,7 +89,11 @@ void app_main()
 
     // ESP_LOGI(TAG, "I2S_DATA_IN_BUFSIZ: %d, I2S_DATA_OUT_BUFSIZ: %d", I2S_DATA_IN_BUFSIZ, I2S_DATA_OUT_BUFSIZ);
 
-    init_gpio();
+    //init_gpio();
+
+    // Setting up GPIO_1 as input so that we can trigger a txInfodump
+    assert(gpio_set_direction(GPIO_NUM_1, GPIO_MODE_INPUT) == ESP_OK);
+    assert(gpio_pullup_en(GPIO_NUM_1) == ESP_OK);
 
     sampFreq = sampleRatesList[0];
     clkValid = 1;
@@ -127,6 +134,9 @@ void app_main()
     blink_state = BLINK_NOT_MOUNTED;
 
     // print_task_list();
+    txInfoQinit();
+
+    bool printed = true;
 
     while(1)
     {
@@ -138,5 +148,15 @@ void app_main()
             i2s_transmit();
         else
             vTaskDelay(pdMS_TO_TICKS(50));
+        if(gpio_get_level(GPIO_NUM_1) == 0){
+            if(printed == false){
+                printf("GPIO 1 low\n");
+                print_txPacketInfo(0);
+            }
+            printed = true;
+        }
+        else {
+            printed = false;
+        }
     } 
 }
