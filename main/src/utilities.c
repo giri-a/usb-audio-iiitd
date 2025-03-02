@@ -2,6 +2,7 @@
 #include "esp_log.h"
 #include "FreeRTOS.h"
 #include "freertos/queue.h"
+#include "sys/time.h"
 
 char *TAG = "utilities";
 
@@ -39,7 +40,9 @@ int32_t mul_8p24x8p24(int32_t a, int32_t b){
     if(*p >  127) return 0x7fffffff;
 
     t = t<<8;
+
     int32_t *q = (int32_t*) &t;
+
     return *++q;
 }
 
@@ -68,7 +71,7 @@ int16_t mul_1p31x8p24(int32_t sig, int32_t gain)
 /*=============== queue code used for debug ===============*/
 struct tx_data_info
 {
- uint32_t timestamp;
+ int64_t timestamp;
  size_t   n_bytes;
 } typedef txPacketInfo;
 
@@ -113,7 +116,7 @@ void print_txPacketInfo(size_t n_items){
     for(size_t i=0; i<n_items; i++){
         if(xQueueReceive(txInfoQ, buf, (TickType_t)0) == pdTRUE){
             p = (txPacketInfo*)buf;
-            printf("%ld : %d\n",p->timestamp,p->n_bytes);
+            printf("%lld : %d\n",p->timestamp,p->n_bytes);
         }
         else {
             return;
@@ -123,8 +126,11 @@ void print_txPacketInfo(size_t n_items){
 
 
 void log_txbytes(size_t n_bytes){
+    struct timeval tv_now;
+    gettimeofday(&tv_now, NULL);
+    int64_t time_us = (int64_t)tv_now.tv_sec * 1000000L + (int64_t)tv_now.tv_usec;
     txPacketInfo s;
-    s.timestamp = esp_log_timestamp();
+    s.timestamp = time_us; //esp_log_timestamp();
     s.n_bytes = n_bytes;
     put_txPacketInfo(&s);
 }
