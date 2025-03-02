@@ -571,9 +571,9 @@ bool tud_audio_set_req_entity_cb(uint8_t rhport, tusb_control_request_t const *p
             //spk_gain[1] =  (spk_mute[0] || spk_mute[2]) ? 0 : mul_8p24x8p24 (gain_table[spk_volume_idx[0]],gain_table[spk_volume_idx[2]]);
 
             TU_LOG2("    Set speaker Mute: %d of channel: %u \r\n", spk_mute[channelNum], channelNum);
-            ESP_LOGI(TAG,"    Set speaker Mute: %d of channel: %u \n       gains: %ld, %ld", spk_mute[channelNum], channelNum,spk_gain[0],spk_gain[1]);
+            //ESP_LOGI(TAG,"    Set speaker Mute: %d of channel: %u \n       gains: %ld, %ld", spk_mute[channelNum], channelNum,spk_gain[0],spk_gain[1]);
 
-            ESP_LOGI(TAG,"spk_gain: %ld, %ld",spk_gain[0],spk_gain[1]);
+            // ESP_LOGI(TAG,"spk_gain: %ld, %ld",spk_gain[0],spk_gain[1]);
             return true;
 
         case AUDIO_FU_CTRL_VOLUME:

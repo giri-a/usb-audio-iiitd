@@ -163,24 +163,16 @@ void decode_and_cancel_offset(int32_t *left_sample_p, int32_t *right_sample_p, b
     }
     if(left_sample_p != NULL)
     {
-        if((*left_sample_p >> (32-MIC_RESOLUTION))> 32767 || (*left_sample_p >> (32 - MIC_RESOLUTION))< -32768){
-        //    printf("left sample clips before offset\n");
-        }
         final_value = (*left_sample_p & BIT_MASK) - (l_offset & BIT_MASK);
         *left_sample_p = mul_1p31x8p24(final_value,mic_gain[0]);
         l_offset += (*left_sample_p) << FILTER_RESPONSE_MULTIPLIER;
-
     }
 
     if(right_sample_p != NULL)
     {
-        if((*right_sample_p >> (32-MIC_RESOLUTION))> 32767 || (*right_sample_p >> (32 - MIC_RESOLUTION))< -32768){
-        //    printf("right sample clips before offset\n");
-        }
         final_value = (*right_sample_p & BIT_MASK)  - (r_offset & BIT_MASK);
         *right_sample_p = mul_1p31x8p24(final_value,mic_gain[1]);
         r_offset += (*right_sample_p) << FILTER_RESPONSE_MULTIPLIER;
-
     }
 }
 
@@ -193,7 +185,7 @@ void decode_and_cancel_offset(int32_t *left_sample_p, int32_t *right_sample_p, b
   bypassing actual I2S receiver.
 */
 
-size_t bsp_i2s_read(uint16_t *data_buf, size_t count)
+uint16_t bsp_i2s_read(void *data_buf, uint16_t count)
 {
     static int tabl_idx = 0;
     int L = sin_tabl_len;
@@ -235,8 +227,7 @@ size_t bsp_i2s_read(uint16_t *data_buf, size_t count)
 }
 
 #else
-//    int t_i2s = 0; static int32_t raw_data[64]; static int32_t processed_data[64]; int k = 0;
-//    static int16_t final_data[64];
+
 /*
   This function is called by tud_audio_tx_done_post_load_cb(). 
   It reads 32bits raw data for both left and right channels from I2S DMA buffers, 
@@ -266,10 +257,9 @@ uint16_t bsp_i2s_read(void *data_buf, uint16_t count)
                 if((n_bytes - j) >= 8) {
                     memcpy(&d_left,(rx_sample_buf+j),4);
                     memcpy(&d_right,(rx_sample_buf+j+4),4);
-                    //if(t_i2s>1000 && t_i2s<1003) raw_data[k] = d_left ;
+
                     decode_and_cancel_offset(&d_left, &d_right, true); // true: no offset cancelling; just the shifting 
                     *(out_buf+i)   = d_left;
-                    //if(t_i2s>1000 && t_i2s<1003) final_data[k++] = *(out_buf+i);
                     *(out_buf+i+1) = d_right;
                     i += 2;
                     j += 8;
@@ -409,22 +399,28 @@ uint16_t adequate_data_at_epout(){
 }
 
 void i2s_transmit() {
-    uint16_t n_bytes = tud_audio_available();
+    uint16_t n_bytes ;
     if((n_bytes = adequate_data_at_epout()) == 0){
-        vTaskDelay(pdMS_TO_TICKS(1));
+        // We are likely to come here at the start of streaming when the epout buffer
+        // may be short of data. So we wait here for longer to have some data buffered
+        // rather than regularly running short and starve I2S DMA.
+        vTaskDelay(pdMS_TO_TICKS(10));
         return;
     }
         data_out_buf_cnt = tud_audio_read(data_out_buf, n_bytes);
         if (data_out_buf_cnt < s_spk_bytes_ms) {
+            // Normally we should never land here unless the host is really busy.
             ESP_LOGI(TAG,"Only %d bytes available; expecting >= %d bytes",data_out_buf_cnt,s_spk_bytes_ms);
             vTaskDelay(pdMS_TO_TICKS(1));
         }   
 
         // make sure that data_out_buf_cnt is a multiple of 2*CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_RX
+        /*
         if(data_out_buf_cnt != ((data_out_buf_cnt>>CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_RX)<<CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_RX))
         {
             ESP_LOGI(TAG,"tud_audio_read returned %d bytes (not multiples of one frame worth bytes)", data_out_buf_cnt);
         }    
+        */
         speaker_amp((int16_t *)data_out_buf, data_out_buf_cnt/(2*CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_RX), spk_gain);
 
 #ifdef DISPLAY_STATS
