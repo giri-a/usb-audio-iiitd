@@ -1,69 +1,58 @@
-| Supported Targets | ESP32 | ESP32-C2 | ESP32-C3 | ESP32-C5 | ESP32-C6 | ESP32-C61 | ESP32-H2 | ESP32-P4 | ESP32-S2 | ESP32-S3 |
-| ----------------- | ----- | -------- | -------- | -------- | -------- | --------- | -------- | -------- | -------- | -------- |
+| Supported Targets | ESP32 | ESP32-C2 | ESP32-C3 | ESP32-C6 | ESP32-H2 | ESP32-P4 | ESP32-S2 | ESP32-S3 |
+| ----------------- | ----- | -------- | -------- | -------- | -------- | -------- | -------- | -------- |
 
-# Blink Example
+# _Sample project_
 
 (See the README.md file in the upper level 'examples' directory for more information about examples.)
 
-This example demonstrates how to blink a LED by using the GPIO driver or using the [led_strip](https://components.espressif.com/component/espressif/led_strip) library if the LED is addressable e.g. [WS2812](https://cdn-shop.adafruit.com/datasheets/WS2812B.pdf). The `led_strip` library is installed via [component manager](main/idf_component.yml).
+This is the simplest buildable example. The example is used by command `idf.py create-project`
+that copies the project to user specified path and set it's name. For more information follow the [docs page](https://docs.espressif.com/projects/esp-idf/en/latest/api-guides/build-system.html#start-a-new-project)
 
-## How to Use Example
 
-Before project configuration and build, be sure to set the correct chip target using `idf.py set-target <chip_name>`.
 
-### Hardware Required
+## How to use example
+We encourage the users to use the example as a template for the new projects.
+A recommended way is to follow the instructions on a [docs page](https://docs.espressif.com/projects/esp-idf/en/latest/api-guides/build-system.html#start-a-new-project).
 
-* A development board with normal LED or addressable LED on-board (e.g., ESP32-S3-DevKitC, ESP32-C6-DevKitC etc.)
-* A USB cable for Power supply and programming
+## Example folder contents
 
-See [Development Boards](https://www.espressif.com/en/products/devkits) for more information about it.
+The project **sample_project** contains one source file in C language [main.c](main/main.c). The file is located in folder [main](main).
 
-### Configure the Project
+ESP-IDF projects are built using CMake. The project build configuration is contained in `CMakeLists.txt`
+files that provide set of directives and instructions describing the project's source files and targets
+(executable, library, or both). 
 
-Open the project configuration menu (`idf.py menuconfig`).
+Below is short explanation of remaining files in the project folder.
 
-In the `Example Configuration` menu:
-
-* Select the LED type in the `Blink LED type` option.
-  * Use `GPIO` for regular LED
-  * Use `LED strip` for addressable LED
-* If the LED type is `LED strip`, select the backend peripheral
-  * `RMT` is only available for ESP targets with RMT peripheral supported
-  * `SPI` is available for all ESP targets
-* Set the GPIO number used for the signal in the `Blink GPIO number` option.
-* Set the blinking period in the `Blink period in ms` option.
-
-### Build and Flash
-
-Run `idf.py -p PORT flash monitor` to build, flash and monitor the project.
-
-(To exit the serial monitor, type ``Ctrl-]``.)
-
-See the [Getting Started Guide](https://docs.espressif.com/projects/esp-idf/en/latest/get-started/index.html) for full steps to configure and use ESP-IDF to build projects.
-
-## Example Output
-
-As you run the example, you will see the LED blinking, according to the previously defined period. For the addressable LED, you can also change the LED color by setting the `led_strip_set_pixel(led_strip, 0, 16, 16, 16);` (LED Strip, Pixel Number, Red, Green, Blue) with values from 0 to 255 in the [source file](main/blink_example_main.c).
-
-```text
-I (315) example: Example configured to blink addressable LED!
-I (325) example: Turning the LED OFF!
-I (1325) example: Turning the LED ON!
-I (2325) example: Turning the LED OFF!
-I (3325) example: Turning the LED ON!
-I (4325) example: Turning the LED OFF!
-I (5325) example: Turning the LED ON!
-I (6325) example: Turning the LED OFF!
-I (7325) example: Turning the LED ON!
-I (8325) example: Turning the LED OFF!
 ```
+├── CMakeLists.txt
+├── main
+│   ├── CMakeLists.txt
+│   └── main.c
+└── README.md                  This is the file you are currently reading
+```
+Additionally, the sample project contains Makefile and component.mk files, used for the legacy Make based build system. 
+They are not used or needed when building with CMake and idf.py.
 
-Note: The color order could be different according to the LED model.
+## settings.json
 
-The pixel number indicates the pixel position in the LED strip. For a single LED, use 0.
+I work on Mac as well as Windows10 machine and use vscode to develop this code.
+Right settings.json is required to seamlessly move between the platforms.
+See https://code.visualstudio.com/docs/getstarted/settings#_settings-precedence
 
-## Troubleshooting
+The settings for ESP-IDF containing ESP_IDF and ESP_IDF_TOOLS paths and python
+environment should be local to the platform specific installations (therefore
+not part of this repo).
 
-* If the LED isn't blinking, check the GPIO or the LED type selection in the `Example Configuration` menu.
+Only certain things like the idfTarget, idfPort etc. are project specific and
+that should be stored in .vscode/settings.json and is part of the repo. 
 
-For any technical queries, please open an [issue](https://github.com/espressif/esp-idf/issues) on GitHub. We will get back to you soon.
+Note that everytime ESP-IDF is configured, it updates .vscode/seetings.json with the platform-specific settings.
+
+.vscode/c_cpp_properties.json is manually edited to include two configurations with names ESP-IDF(Mac) and ESP-IDF(Win). Configuring through command panel, will create one with platform specific paths; manual edit was required to combine the two under different names. Based on the platform you are working on, choose the appropriate configuration by clicking on the configuration (at the very right end) on the status bar of vscode.
+
+## CMake
+Sometimes the settings get all messed up and/or cmake makes it so. It cannot find IDF_PATH variable. For this reason and also to be able to run idf.py from command line it is advisable to add the tools path to system PATH variable. The instructions are at this link.
+https://docs.espressif.com/projects/esp-idf/en/v3.3/get-started-cmake/add-idf_path-to-profile.html
+
+However, it seems that I ran into this problem since I clicked on a prompt in VSCODE to run cmake at every startup. Once I disabled it in settings, the build seemed to happen just fine. 
