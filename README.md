@@ -1,22 +1,40 @@
-| Supported Targets | ESP32 | ESP32-C2 | ESP32-C3 | ESP32-C6 | ESP32-H2 | ESP32-P4 | ESP32-S2 | ESP32-S3 |
-| ----------------- | ----- | -------- | -------- | -------- | -------- | -------- | -------- | -------- |
+| Supported Targets | ESP32-S3 |
+| ----------------- | ---------|
 
-# _Sample project_
+# _USB Audio dongle (for IIIT-Dharwad workshop)_
 
-(See the README.md file in the upper level 'examples' directory for more information about examples.)
+This project implements a 2-ch USB audio device for playback and recording functions. 
+I2S amplifier (for playback) and I2S Mic (for recording) are interfaced with the GPIO pins
+configured as BCLK, WS, DIN, DOUT.
 
-This is the simplest buildable example. The example is used by command `idf.py create-project`
-that copies the project to user specified path and set it's name. For more information follow the [docs page](https://docs.espressif.com/projects/esp-idf/en/latest/api-guides/build-system.html#start-a-new-project)
+It was started based on https://github.com/espressif/esp-skainet/tree/master/examples/usb_mic_recorder
+(I found the pointer in a discussion on the thread https://github.com/espressif/esp-idf/issues/12774).
 
+While working on some issues, I came across https://github.com/espressif/esp-box/tree/master/examples/usb_headset 
+and incorporated some codes from that.
 
+I started with Knowles SPH0645 I2S MEMS mics, which has its own specific requirements. One important
+one is that it seems to have large offset, which needed a highpass filter to correct.
+Those mics broke and now I use INMP441 mics from Invensense. These do not require the offset cancellation, but
+vestiges of the previous code linger on. 
 
-## How to use example
-We encourage the users to use the example as a template for the new projects.
-A recommended way is to follow the instructions on a [docs page](https://docs.espressif.com/projects/esp-idf/en/latest/api-guides/build-system.html#start-a-new-project).
+INMP441 seems to have a noise issue at 16kHz, which disappers at 24kHz or higher.
 
-## Example folder contents
+The data format is fixed at 16bits and the sampling frequency is configurable (16kHz, 32kHz and 24kHz).
+Mute and volume control functions are implemented.
 
-The project **sample_project** contains one source file in C language [main.c](main/main.c). The file is located in folder [main](main).
+Most of the development was done on Mac. Recently when I started testing on Windows, I came across a few issues:
+- Windows driver does not support a master channel (only L and R) for volume control. 
+- Controlling volume requires one to go through a few hops (COntrol Panel->Hardware->Sound ...)
+- I have not found a single relatively simple application so far that does playback and recording in one application. So operations like looping back are not allowed because it requires two programs to have access to the driver. 
+- For whatever reason, Windows driver does not like 24kHz sampling frequency, so it does not even offer it.
+- Windows native 'voice recorder' application does not work with 32kHz. So I am stuck with 16kHz only.
+
+## Building 
+- This was built using VSCode using ESP-IDF 5.4.0 extension. 
+- It has dependency on two managed components : espressif__tinyusb (0.15.0~9) and espressif__led_strip. Previous versions of espressif__tinyusb has a bug related to opening the device connections multiple times.
+
+## Folder contents
 
 ESP-IDF projects are built using CMake. The project build configuration is contained in `CMakeLists.txt`
 files that provide set of directives and instructions describing the project's source files and targets
@@ -28,12 +46,26 @@ Below is short explanation of remaining files in the project folder.
 ├── CMakeLists.txt
 ├── main
 │   ├── CMakeLists.txt
-│   └── main.c
+│   ├── idf_components.yml
+│   ├── Kconfig.projbuild
+│   ├── main.c
+│   ├── src
+│   │    ├── i2s_functions.c
+│   │    ├── blink_led.c
+│   │    ├── uad_callbacks.c
+│   │    |── usb_descriptors.c
+|   |    └── utilities.c
+│   └── include
+│        ├── tusb_config.h
+│        ├── usb_descriptors.h
+│        ├── i2s_functions.h
+│        ├── blink.h
+|        |── data_buffers.h
+|        |── utilities.h
+│        └── gain_table.h
+├
 └── README.md                  This is the file you are currently reading
 ```
-Additionally, the sample project contains Makefile and component.mk files, used for the legacy Make based build system. 
-They are not used or needed when building with CMake and idf.py.
-
 ## settings.json
 
 I work on Mac as well as Windows10 machine and use vscode to develop this code.
