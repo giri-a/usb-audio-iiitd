@@ -95,7 +95,7 @@ extern "C" {
 #define CFG_TUD_AUDIO_FUNC_1_N_FORMATS                               1
 
 // Audio format type I specifications
-#define CFG_TUD_AUDIO_FUNC_1_MAX_SAMPLE_RATE                         32000     // 16bit/48kHz is the best quality for Renesas RX
+#define CFG_TUD_AUDIO_FUNC_1_MAX_SAMPLE_RATE                         48000     // 16bit/48kHz is the best quality for Renesas RX
 #define CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_TX                           2          // Two Mic channels
 #define CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_RX                           2          // Two speaker channels
 

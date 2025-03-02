@@ -53,12 +53,26 @@ static size_t s_mic_bytes_ms = 0;
 // Audio controls
 
 // Current states
-static int8_t  spk_mute   [CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_RX + 1] = {0};       // +1 for master channel 0
-static int16_t spk_volume [CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_RX + 1];    // +1 for master channel 0
-int32_t spk_gain   [CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_RX];
-static int8_t  mic_mute   [CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_TX + 1] = {0};       // +1 for master channel 0
-static int16_t mic_volume [CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_TX + 1] = {32767,32767,32767};    // +1 for master channel 0
-int32_t mic_gain   [CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_TX];
+#if (CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_RX==1)
+static int8_t  spk_mute   [2] = {0,0};       // +1 for master channel 0
+static int16_t spk_volume [2] = {20,20};    // +1 for master channel 0
+int32_t spk_gain   [1] = {16777216};
+#endif
+#if (CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_RX==2)
+static int8_t  spk_mute   [3] = {0,0,0};       // +1 for master channel 0
+static int16_t spk_volume [3];    // +1 for master channel 0
+int32_t spk_gain   [2] ; //= {16777216,16777216};
+#endif
+#if (CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_TX==1)
+static int8_t  mic_mute   [2] = {0,0};       // +1 for master channel 0
+static int16_t mic_volume [2] = {20,20};    // +1 for master channel 0
+int32_t mic_gain   [1] = {16777216};
+#endif
+#if (CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_TX==2)
+static int8_t  mic_mute   [3] = {0,0};       // +1 for master channel 0
+static int16_t mic_volume [3];// = {20,20,20};    // +1 for master channel 0
+int32_t mic_gain   [2];// = {16777216,16777216};
+#endif
 
 // Volume control range
 // From UAC2.0:
@@ -95,7 +109,7 @@ static audio_control_range_2_n_t(1) mic_range_vol = {
     .subrange[0] = { .bMin = tu_htole16(-VOLUME_CTRL_40_DB), tu_htole16(VOLUME_CTRL_20_DB), tu_htole16(512) }
 };
 // List of supported sample rates
-const uint32_t sampleRatesList[] = { 16000, 24000, 32000 };
+const uint32_t sampleRatesList[] = { 16000, 24000, 32000, 44100 };
 
 uint32_t sampFreq;
 uint8_t clkValid = 0;
@@ -370,7 +384,7 @@ bool tud_audio_get_req_entity_cb(uint8_t rhport, tusb_control_request_t const *p
         case AUDIO_FU_CTRL_MUTE:
             // Audio control mute cur parameter block consists of only one byte - we thus can send it right away
             // There does not exist a range parameter block for mute
-            //TU_LOG2("    Get Mute of channel: %u\r\n", channelNum);
+            TU_LOG2("    Get Mute of channel: %u\r\n", channelNum);
             //return tud_control_xfer(rhport, p_request, &mute[channelNum], 1);
             switch(p_request->bRequest){
                 case AUDIO_CS_REQ_CUR:
@@ -385,7 +399,7 @@ bool tud_audio_get_req_entity_cb(uint8_t rhport, tusb_control_request_t const *p
         case AUDIO_FU_CTRL_VOLUME:
             switch ( p_request->bRequest ) {
             case AUDIO_CS_REQ_CUR:
-                //TU_LOG2("    Get Volume of channel: %u\r\n", channelNum);
+                TU_LOG2("    Get Volume of channel: %u\r\n", channelNum);
                 //return tud_control_xfer(rhport, p_request, &volume[channelNum], sizeof(volume[channelNum]));
                 audio_control_cur_2_t cur_vol = { .bCur = tu_htole16(spk_volume[channelNum]) };
                 TU_LOG1("Get channel %u spk_volume %d dB\r\n", channelNum, cur_vol.bCur / 256);
@@ -512,6 +526,19 @@ bool tud_audio_get_req_entity_cb(uint8_t rhport, tusb_control_request_t const *p
 }
 
 #define CHNL_STR(chN) (chN==0?"Master":(chN==1?"L":(chN==2?"R":"??")))
+
+void calculate_ch_gain(int8_t *mute, int16_t *db_gain_scaled, int32_t *ch_linear_gain){
+    int ch0_volume_db = db_gain_scaled[0] / 256; // Convert to dB
+    int ch0_gain_table_idx = (ch0_volume_db + 40) / 2; // gain table is -40dB to 0dB in steps of 2dB; vol change request should also be in steps of 2dB
+    int ch1_volume_db = db_gain_scaled[1] / 256; // Convert to dB
+    int ch1_gain_table_idx = (ch1_volume_db + 40) / 2; // gain table is -40dB to 0dB in steps of 2dB; vol change request should also be in steps of 2dB
+    int ch2_volume_db = db_gain_scaled[2] / 256; // Convert to dB
+    int ch2_gain_table_idx = (ch2_volume_db + 40) / 2; // gain table is -40dB to 0dB in steps of 2dB; vol change request should also be in steps of 2dB
+
+    ch_linear_gain[0] =  (mute[0] || mute[1]) ? 0 : mul_8p24x8p24 (gain_table[ch0_gain_table_idx],gain_table[ch1_gain_table_idx]);
+    ch_linear_gain[1] =  (mute[0] || mute[2]) ? 0 : mul_8p24x8p24 (gain_table[ch0_gain_table_idx],gain_table[ch2_gain_table_idx]);
+}
+
 // Invoked when audio class specific set request received for an entity
 bool tud_audio_set_req_entity_cb(uint8_t rhport, tusb_control_request_t const *p_request, uint8_t *pBuff)
 {
@@ -539,11 +566,14 @@ bool tud_audio_set_req_entity_cb(uint8_t rhport, tusb_control_request_t const *p
             spk_mute[channelNum] = ((audio_control_cur_1_t *) pBuff)->bCur;
 
             // recalculate the gain multiplier for the channel
-            spk_gain[0] =  (spk_mute[0] || spk_mute[1]) ? 0 : mul_8p24x8p24 (gain_table[spk_volume[0]],gain_table[spk_volume[1]]);
-            spk_gain[1] =  (spk_mute[0] || spk_mute[2]) ? 0 : mul_8p24x8p24 (gain_table[spk_volume[0]],gain_table[spk_volume[2]]);
+            calculate_ch_gain(spk_mute, spk_volume, spk_gain);
+            //spk_gain[0] =  (spk_mute[0] || spk_mute[1]) ? 0 : mul_8p24x8p24 (gain_table[spk_volume_idx[0]],gain_table[spk_volume_idx[1]]);
+            //spk_gain[1] =  (spk_mute[0] || spk_mute[2]) ? 0 : mul_8p24x8p24 (gain_table[spk_volume_idx[0]],gain_table[spk_volume_idx[2]]);
 
             TU_LOG2("    Set speaker Mute: %d of channel: %u \r\n", spk_mute[channelNum], channelNum);
+            ESP_LOGI(TAG,"    Set speaker Mute: %d of channel: %u \n       gains: %ld, %ld", spk_mute[channelNum], channelNum,spk_gain[0],spk_gain[1]);
 
+            ESP_LOGI(TAG,"spk_gain: %ld, %ld",spk_gain[0],spk_gain[1]);
             return true;
 
         case AUDIO_FU_CTRL_VOLUME:
@@ -552,13 +582,18 @@ bool tud_audio_set_req_entity_cb(uint8_t rhport, tusb_control_request_t const *p
 
             spk_volume[channelNum] = ((audio_control_cur_2_t *) pBuff)->bCur;
 
+            calculate_ch_gain(spk_mute, spk_volume, spk_gain);
+/*
             int spk_volume_db = spk_volume[channelNum] / 256; // Convert to dB
-            int volume = (spk_volume_db + 40) / 2; // gain table is -40dB to +40dB in steps of 2dB; vol change request should also be in steps of 2dB
-            spk_volume[channelNum] = volume;
-            spk_gain[0] =  (spk_mute[0] || spk_mute[1]) ? 0 : mul_8p24x8p24 (gain_table[spk_volume[0]],gain_table[spk_volume[1]]);
-            spk_gain[1] =  (spk_mute[0] || spk_mute[2]) ? 0 : mul_8p24x8p24 (gain_table[spk_volume[0]],gain_table[spk_volume[2]]);
+            int volume = (spk_volume_db + 40) / 2; // gain table is -40dB to 0dB in steps of 2dB; vol change request should also be in steps of 2dB
+            spk_volume_idx[channelNum] = volume;
+            ESP_LOGI(TAG,"spk_volume[%d]: %d",channelNum,volume);
 
-            TU_LOG2("    Set Volume: %d dB of channel: %u\r\n", volume[channelNum], channelNum);
+            spk_gain[0] =  (spk_mute[0] || spk_mute[1]) ? 0 : mul_8p24x8p24 (gain_table[spk_volume_idx[0]],gain_table[spk_volume_idx[1]]);
+            spk_gain[1] =  (spk_mute[0] || spk_mute[2]) ? 0 : mul_8p24x8p24 (gain_table[spk_volume_idx[0]],gain_table[spk_volume_idx[2]]);
+*/
+            TU_LOG2("    Set Volume: %d dB of channel: %u\r\n", spk_volume[channelNum]/256, channelNum);
+            //ESP_LOGI(TAG,"spk_gain: %ld, %ld",spk_gain[0],spk_gain[1]);
             return true;
 
         // Unknown/Unsupported control
@@ -576,11 +611,11 @@ bool tud_audio_set_req_entity_cb(uint8_t rhport, tusb_control_request_t const *p
             mic_mute[channelNum] = ((audio_control_cur_1_t *) pBuff)->bCur;
 
             // recalculate the gain multiplier for the channel
-            mic_gain[0] =  (mic_mute[0] || mic_mute[1]) ? 0 : mul_8p24x8p24 (gain_table[mic_volume[0]],gain_table[mic_volume[1]]);
-            mic_gain[1] =  (mic_mute[0] || mic_mute[2]) ? 0 : mul_8p24x8p24 (gain_table[mic_volume[0]],gain_table[mic_volume[2]]);
+            calculate_ch_gain(mic_mute, mic_volume, mic_gain);
+            //mic_gain[0] =  (mic_mute[0] || mic_mute[1]) ? 0 : mul_8p24x8p24 (gain_table[mic_volume[0]],gain_table[mic_volume[1]]);
+            //mic_gain[1] =  (mic_mute[0] || mic_mute[2]) ? 0 : mul_8p24x8p24 (gain_table[mic_volume[0]],gain_table[mic_volume[2]]);
             TU_LOG2("    Set mic Mute: %d of channel: %u\r\n", mic_mute[channelNum], channelNum);
-            ESP_LOGI(TAG,"    Set mic Mute: %d of channel: %u (%s)", mic_mute[channelNum], channelNum, CHNL_STR(channelNum));
-            //ESP_LOGI(TAG,"     mic_gain: %ld, %ld", mic_gain[0],mic_gain[1]);
+            ESP_LOGI(TAG,"    Set mic Mute: %d of channel: %u (%s)\n     mic_gain: %ld, %ld", mic_mute[channelNum], channelNum, CHNL_STR(channelNum), mic_gain[0], mic_gain[1]);
             return true;
 
         case AUDIO_FU_CTRL_VOLUME:
@@ -589,6 +624,13 @@ bool tud_audio_set_req_entity_cb(uint8_t rhport, tusb_control_request_t const *p
 
             mic_volume[channelNum] = ((audio_control_cur_2_t *) pBuff)->bCur;
 
+            /* Windows drivers refuses to send a volume more than 0dB, even if the range is programmed to be e.g., +20 - -40dB.
+               SO THIS IS A HACK. we just bump it up here by 20dB.
+            */
+            mic_volume[channelNum] += 20 * 256;
+
+            calculate_ch_gain(mic_mute, mic_volume, mic_gain);
+/*
             int mic_volume_db = mic_volume[channelNum] / 256; // Convert to dB
 
             int volume = (mic_volume_db + 40) / 2; // gain table is -40dB to +40dB in steps of 2dB; vol change request should also be in steps of 2dB
@@ -596,10 +638,11 @@ bool tud_audio_set_req_entity_cb(uint8_t rhport, tusb_control_request_t const *p
             // recalculate the gain multiplier for the channel
             mic_gain[0] =  (mic_mute[0] || mic_mute[1]) ? 0 : mul_8p24x8p24 (gain_table[mic_volume[0]],gain_table[mic_volume[1]]);
             mic_gain[1] =  (mic_mute[0] || mic_mute[2]) ? 0 : mul_8p24x8p24 (gain_table[mic_volume[0]],gain_table[mic_volume[2]]);
+*/
 
+            //ESP_LOGI(TAG,"    Set mic volume: %d dB of channel: %u", mic_volume[channelNum]/256, channelNum);
             //ESP_LOGI(TAG,"     mic_gain: %ld, %ld", mic_gain[0],mic_gain[1]);
-
-            TU_LOG2("    Set Volume: %d dB of channel: %u\r\n", volume[channelNum], channelNum);
+            TU_LOG2("    Set Volume: %d dB of channel: %u\r\n", mic_volume[channelNum]/256, channelNum);
             return true;
 
         // Unknown/Unsupported control

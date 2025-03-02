@@ -82,10 +82,10 @@ void app_main()
     i2s_get_data = &tud_audio_read;
 
     /* Use the following for USB loopback and I2S loopback. Comment out the two lines above.*/
-    /* I2S Mic => I2S Speakers ; USB out => USB in 
-    usb_get_data = &uad_processed_data;
-    i2s_get_data = &bsp_i2s_read;
-    */
+    /* I2S Mic => I2S Speakers ; USB out => USB in */
+    //usb_get_data = &tud_audio_read;
+    //i2s_get_data = &bsp_i2s_read;
+    
 
     // ESP_LOGI(TAG, "I2S_DATA_IN_BUFSIZ: %d, I2S_DATA_OUT_BUFSIZ: %d", I2S_DATA_IN_BUFSIZ, I2S_DATA_OUT_BUFSIZ);
 

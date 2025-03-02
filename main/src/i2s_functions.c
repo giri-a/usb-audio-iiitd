@@ -244,14 +244,14 @@ size_t bsp_i2s_read(uint16_t *data_buf, size_t count)
   data_buf. count is the requested number of bytes. Actual number of bytes read is 
   returned.
 */
-size_t bsp_i2s_read(void *data_buf, size_t count)
+uint16_t bsp_i2s_read(void *data_buf, uint16_t count)
 {
     // t_i2s ++;
     int16_t *out_buf = (int16_t*)data_buf;
     static size_t  n_bytes;
     static int32_t d_left, d_right;
 
-    int i = 0;
+    uint16_t i = 0;
  
     while (i<count/2) {     // i keeps count of number of int16_t types processed into out_buf
         n_bytes = 0;
@@ -261,7 +261,7 @@ size_t bsp_i2s_read(void *data_buf, size_t count)
             //assert(rx_sample_buflen==n_bytes);
             if(rx_sample_buflen != n_bytes)
             printf("rx_sample_buflen : %d, n_bytes: %d\n", rx_sample_buflen, n_bytes);
-            int j = 0;
+            size_t j = 0;
             while(j < n_bytes) {
                 if((n_bytes - j) >= 8) {
                     memcpy(&d_left,(rx_sample_buf+j),4);
@@ -314,7 +314,7 @@ size_t bsp_i2s_read(void *data_buf, size_t count)
   Max val of n_bytes is CFG_TUD_AUDIO_FUNC_1_EP_OUT_SW_BUF_SZ (see uad_callbacks.c).
   This function is called by audio_consumer_func() task.
 */
-void bsp_i2s_write(void *data_buf, size_t n_bytes){
+void bsp_i2s_write(void *data_buf, uint16_t n_bytes){
 
     /* each sample is 32bits and there are 2 channels; so a EP buffer of CFG_TUD_AUDIO_FUNC_1_EP_OUT_SW_BUF_SZ (N) 
      * bytes (each data is 16bits) will produce (N/2)*2=N 32bits total o/p samples for L+R  
@@ -393,13 +393,27 @@ extern size_t s_spk_bytes_ms;
    to I2S TX channel.
 */
 
+/* Checks of there is multiple of a frame's worth data is available to be read at EPOUT fifo */
+uint16_t adequate_data_at_epout(){
+    uint16_t n_bytes = tud_audio_available();
+    if(n_bytes == 0 ) {
+        //ESP_LOGI(TAG,"0 bytes available to be read at EPOUT fifo");
+        return 0;
+    }
+    if(n_bytes != ((n_bytes>>CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_RX)<<CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_RX)) {
+        ESP_LOGI(TAG,"%d bytes available at EPOUT fifo (not multiples of one frame worth bytes)", n_bytes);
+        //vTaskDelay(pdMS_TO_TICKS(1));
+        return 0;
+    }
+    return n_bytes;
+}
+
 void i2s_transmit() {
     uint16_t n_bytes = tud_audio_available();
-    if(n_bytes == 0 || n_bytes != ((n_bytes>>CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_RX)<<CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_RX)) {
-        ESP_LOGI(TAG,"tud_audio_read returned %d bytes (not multiples of one frame worth bytes)", n_bytes);
+    if((n_bytes = adequate_data_at_epout()) == 0){
         vTaskDelay(pdMS_TO_TICKS(1));
         return;
-    }    
+    }
         data_out_buf_cnt = tud_audio_read(data_out_buf, n_bytes);
         if (data_out_buf_cnt < s_spk_bytes_ms) {
             ESP_LOGI(TAG,"Only %d bytes available; expecting >= %d bytes",data_out_buf_cnt,s_spk_bytes_ms);
