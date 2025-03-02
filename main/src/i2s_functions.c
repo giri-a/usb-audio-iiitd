@@ -8,7 +8,7 @@
 #include "esp_task_wdt.h"
 #include "utilities.h"
 
-//#define DUMMY_I2S 1
+//#define I2S_INTERNAL_SOURCE 1
 
 //#define I2S_EXTERNAL_LOOPBACK
 
@@ -23,11 +23,12 @@
 
 static const char* TAG = "i2s_functions";
 
+/*
 #ifdef DUMMY_I2S
 #include <rom/ets_sys.h>
 #include "trig_table.h"
 #endif
-
+*/
 #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 0, 0)
 static i2s_chan_handle_t                tx_handle = NULL;        // I2S tx channel handler
 static i2s_chan_handle_t                rx_handle = NULL;        // I2S rx channel handler
@@ -41,6 +42,8 @@ static i2s_chan_handle_t                rx_handle = NULL;        // I2S rx chann
 /*raw buffer to read data from I2S dma buffers*/
 static char rx_sample_buf [CFG_TUD_AUDIO_FUNC_1_EP_IN_SW_BUF_SZ];
 static size_t  rx_sample_buflen = 0;// value is set based on sample rate etc. when the i2s is configured 
+
+static int32_t tx_sample_buf [CFG_TUD_AUDIO_FUNC_1_EP_OUT_SW_BUF_SZ/2];
 
 extern int32_t mic_gain[2];
 extern int32_t spk_gain[2];
@@ -97,6 +100,13 @@ esp_err_t bsp_i2s_init(i2s_port_t i2s_num, uint32_t sample_rate)
     data_in_buf_cnt   = chan_cfg.dma_frame_num * std_cfg.slot_cfg.slot_mode *2 ;
     ESP_LOGI(TAG,"rx_sample_buflen: %d, data_in_buf_cnt: %d", rx_sample_buflen, data_in_buf_cnt);
 
+    // preload TX DMA buffer so that upon enabling it does not transmit noise
+    // static int32_t tx_sample_buf [CFG_TUD_AUDIO_FUNC_1_EP_OUT_SW_BUF_SZ/2];
+    size_t n_bytes = 0;
+    for(;n_bytes<CFG_TUD_AUDIO_FUNC_1_EP_OUT_SW_BUF_SZ/2;n_bytes++){
+        tx_sample_buf[n_bytes] = 0;
+    }
+    i2s_channel_preload_data(tx_handle, (void*)tx_sample_buf, n_bytes*4, &n_bytes);
 
     ret_val |= i2s_channel_enable(tx_handle);
     ret_val |= i2s_channel_enable(rx_handle);
@@ -176,15 +186,52 @@ void decode_and_cancel_offset(int32_t *left_sample_p, int32_t *right_sample_p, b
     }
 }
 
-#ifdef DUMMY_I2S
 
 #define OFFSET 1000
 
+#ifdef I2S_INTERNAL_SOURCE
+extern uint32_t sampFreq;
+/*
+T = 16000 // 62.5uS in .8 format for fs=16kHz
+T = 10667 // 41.67uS in .8 format for fs=24kHz
+T =  8000 // 31.25 in .8 format for fs=32kHz
+T =  5805 // 22.68uS in .8 format for fs=44.1kHz
+*/
+#define getPeriod(f) (f==16000?16000:(f==24000?10667:(f==32000?8000:5805)))
+
+#define HALF_PERIOD_441HZ 290249 /* in 0.8 format*/
+#define HALF_PERIOD_220HZ 581818 /* in 0.8 format*/
+#define HALF_PERIOD_100HZ 1280000 /* in 0.8 format*/
+#define SIGNAL_HALF_PERIOD HALF_PERIOD_220HZ
 /*
   This function feeds synthetic data (sinusoid) to the receive channel 
   bypassing actual I2S receiver.
 */
+uint16_t bsp_i2s_read(void *data_buf, uint16_t count /* bytes*/)
+{
+    // lets assume fs=16kHz; so sample period is 1/16 mS or more generally T=1/fs s
+    // Let us assume frequency of the square wave that we want to produce is 441Hz (f).
+    int16_t *out_buf = (int16_t*)data_buf;
 
+    int32_t T = getPeriod(sampFreq);
+    static int16_t sig_value = 16000;
+    static int n_samples_from_last_edge = 0;
+    for(int i = 0; i < count/4; i++){ /* each frame has 4 bytes*/
+        if(n_samples_from_last_edge*T > SIGNAL_HALF_PERIOD) {
+            sig_value = sig_value == 16000 ? -16000 : 16000;
+            n_samples_from_last_edge = 0;
+        }
+        else
+            n_samples_from_last_edge ++;
+        *out_buf = sig_value;
+        out_buf++;
+        *out_buf = sig_value; /*for stereo */
+        out_buf++;
+    }
+    return count;
+
+}
+/*
 uint16_t bsp_i2s_read(void *data_buf, uint16_t count)
 {
     static int tabl_idx = 0;
@@ -225,7 +272,7 @@ uint16_t bsp_i2s_read(void *data_buf, uint16_t count)
 
     return count;
 }
-
+*/
 #else
 
 /*
@@ -270,9 +317,6 @@ uint16_t bsp_i2s_read(void *data_buf, uint16_t count)
                     break;
                 }
             }
-            //printf("k: %d ",k);
-            //if(i>=count) printf("i: %d, count: %d\n",i,count);
-            //fflush(stdout);
             assert(i<=count);
         }
         else {
@@ -280,15 +324,6 @@ uint16_t bsp_i2s_read(void *data_buf, uint16_t count)
             break;
         }
     } 
-    /*
-    if(t_i2s==1003){
-        printf("mic_gain: %ld , %ld\n",mic_gain[0], mic_gain[1]);
-        for(k=0;k<32;k++){
-        //printf("%ld => %ld => %d\n",raw_data[k],processed_data[k],final_data[k]);
-        printf("%08lx %ld \t %08lx %ld \t %08x %d\n",raw_data[k],raw_data[k],processed_data[k], processed_data[k], final_data[k], final_data[k]);
-        }
-    }
-    */
 
     if(i*2 < count)
     ESP_LOGI(TAG,"returning %d bytes; was asked for %d bytes",i*2,count);
@@ -309,8 +344,6 @@ void bsp_i2s_write(void *data_buf, uint16_t n_bytes){
     /* each sample is 32bits and there are 2 channels; so a EP buffer of CFG_TUD_AUDIO_FUNC_1_EP_OUT_SW_BUF_SZ (N) 
      * bytes (each data is 16bits) will produce (N/2)*2=N 32bits total o/p samples for L+R  
      */
-
-    static int32_t tx_sample_buf [CFG_TUD_AUDIO_FUNC_1_EP_OUT_SW_BUF_SZ/2];
 
     int16_t *src   = (int16_t *)data_buf;
     int16_t *limit = (int16_t *)data_buf + n_bytes/2 ;
@@ -385,6 +418,9 @@ extern size_t s_spk_bytes_ms;
 
 /* Checks of there is multiple of a frame's worth data is available to be read at EPOUT fifo */
 uint16_t adequate_data_at_epout(){
+#ifdef I2S_INTERNAL_SOURCE
+    return s_spk_bytes_ms; // this only when we are using an internal source
+#endif
     uint16_t n_bytes = tud_audio_available();
     if(n_bytes == 0 ) {
         //ESP_LOGI(TAG,"0 bytes available to be read at EPOUT fifo");
@@ -407,7 +443,8 @@ void i2s_transmit() {
         vTaskDelay(pdMS_TO_TICKS(10));
         return;
     }
-        data_out_buf_cnt = tud_audio_read(data_out_buf, n_bytes);
+        //data_out_buf_cnt = tud_audio_read(data_out_buf, n_bytes);
+        data_out_buf_cnt = (*i2s_get_data)(data_out_buf, n_bytes);
         if (data_out_buf_cnt < s_spk_bytes_ms) {
             // Normally we should never land here unless the host is really busy.
             ESP_LOGI(TAG,"Only %d bytes available; expecting >= %d bytes",data_out_buf_cnt,s_spk_bytes_ms);

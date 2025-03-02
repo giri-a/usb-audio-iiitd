@@ -80,7 +80,7 @@ void app_main()
     /* USB out => I2S Speakers; USB in <= I2S Mic */
     usb_get_data = &bsp_i2s_read;
     i2s_get_data = &tud_audio_read;
-
+ 
     /* Use the following for USB loopback and I2S loopback. Comment out the two lines above.*/
     /* I2S Mic => I2S Speakers ; USB out => USB in */
     //usb_get_data = &tud_audio_read;

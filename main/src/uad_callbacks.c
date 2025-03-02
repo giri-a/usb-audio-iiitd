@@ -109,7 +109,7 @@ static audio_control_range_2_n_t(1) mic_range_vol = {
     .subrange[0] = { .bMin = tu_htole16(-VOLUME_CTRL_40_DB), tu_htole16(VOLUME_CTRL_20_DB), tu_htole16(512) }
 };
 // List of supported sample rates
-const uint32_t sampleRatesList[] = { 16000, 24000, 32000, 44100 };
+const uint32_t sampleRatesList[] = { 16000, 24000, 32000 };
 
 uint32_t sampFreq;
 uint8_t clkValid = 0;
