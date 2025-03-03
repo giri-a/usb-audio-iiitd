@@ -59,7 +59,8 @@ void app_main()
 
     usb_headset_init();
 
-/*
+    usb_get_data = &bsp_i2s_read;
+
     ret_val = xTaskCreatePinnedToCore(usb_device_task, "usb_device_task", 3 * 1024, NULL, 2, &usb_device_task_handle,0);
     if (ret_val != pdPASS) {
         ESP_LOGE(TAG, "Failed to create usb_task");
@@ -67,7 +68,7 @@ void app_main()
         return;
     }
     ESP_LOGI(TAG, "TinyUSB initialized");
-*/
+
 
     configure_led();
 

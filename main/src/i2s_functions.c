@@ -286,10 +286,20 @@ extern size_t s_spk_bytes_ms;
 
 /* Checks of there is multiple of a frame's worth data is available to be read at EPOUT fifo */
 uint16_t adequate_data_at_epout(){
-    uint16_t n_bytes = s_spk_bytes_ms;
+
     // USE 'uint16_t tud_audio_available()' for checking if there are enough bytes at the 
     // USB EPOUT fifo. Enough means non-zero and also multiple of one frame's worth data
     // If this checks out, RETURN number of bytes available or 0
+    uint16_t n_bytes = tud_audio_available();
+    if(n_bytes == 0 ) {
+        //ESP_LOGI(TAG,"0 bytes available to be read at EPOUT fifo");
+        return 0;
+    }
+    if(n_bytes != ((n_bytes>>CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_RX)<<CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_RX)) {
+        ESP_LOGI(TAG,"%d bytes available at EPOUT fifo (not multiples of one frame worth bytes)", n_bytes);
+        //vTaskDelay(pdMS_TO_TICKS(1));
+        return 0;
+    }
     return n_bytes;
 }
 
@@ -306,7 +316,7 @@ void i2s_transmit() {
     //may USE speaker_amp() to amplify the signal (i.e., volume control)
     //USE 'bsp_i2s_write(void *buf, uint16_t n_bytes)' to write to I2S TX DMA buffer
 
-    data_out_buf_cnt = bsp_i2s_read(data_out_buf, n_bytes); // data_out_buf etc. are declared in main.c
+    data_out_buf_cnt = tud_audio_read(data_out_buf, n_bytes); // data_out_buf etc. are declared in main.c
     if (data_out_buf_cnt < s_spk_bytes_ms) {
             // Normally we should never land here unless the host is really busy.
             ESP_LOGI(TAG,"Only %d bytes available; expecting >= %d bytes",data_out_buf_cnt,s_spk_bytes_ms);
