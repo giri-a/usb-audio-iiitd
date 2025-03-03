@@ -8,31 +8,13 @@
 #include "esp_task_wdt.h"
 #include "utilities.h"
 
-//#define I2S_INTERNAL_SOURCE 1
-
-//#define I2S_EXTERNAL_LOOPBACK
-
-#ifdef I2S_EXTERNAL_LOOPBACK
-#define MIC_RESOLUTION      16
-#define I2S_PROCESS_READ_DATA(left, right) decode_and_cancel_offset(&(left), &(right), true)
-#else
 #define MIC_RESOLUTION      24
 #define GAIN                4      // in bits i.e., 1 =>2, 2=>4, 3=>8 etc.
-#define I2S_PROCESS_READ_DATA(left, right) decode_and_cancel_offset(&(left), &(right), false); left <<= GAIN; right <<= GAIN 
-#endif
 
 static const char* TAG = "i2s_functions";
 
-/*
-#ifdef DUMMY_I2S
-#include <rom/ets_sys.h>
-#include "trig_table.h"
-#endif
-*/
-#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 0, 0)
 static i2s_chan_handle_t                tx_handle = NULL;        // I2S tx channel handler
 static i2s_chan_handle_t                rx_handle = NULL;        // I2S rx channel handler
-#endif
 
 #define I2S_GPIO_DOUT    GPIO_NUM_34
 #define I2S_GPIO_DIN     GPIO_NUM_36
@@ -47,9 +29,6 @@ static int32_t tx_sample_buf [CFG_TUD_AUDIO_FUNC_1_EP_OUT_SW_BUF_SZ/2];
 
 extern int32_t mic_gain[2];
 extern int32_t spk_gain[2];
-#ifdef DISPLAY_STATS
-extern size_t spk_bytes_available_ary[];
-#endif
 
 esp_err_t bsp_i2s_init(i2s_port_t i2s_num, uint32_t sample_rate)
 {
@@ -65,13 +44,13 @@ esp_err_t bsp_i2s_init(i2s_port_t i2s_num, uint32_t sample_rate)
     chan_cfg.dma_frame_num = sample_rate/1000;  // number of frames in 1mS; cannot handle sample_rate like 44.1kHz
     
     ret_val |= i2s_new_channel(&chan_cfg, &tx_handle, &rx_handle);
-    //i2s_std_config_t std_cfg = I2S_CONFIG_DEFAULT(sample_rate, channel_fmt, bits_per_chan);
+
     i2s_std_config_t std_cfg = {
         .clk_cfg  = I2S_STD_CLK_DEFAULT_CONFIG(sample_rate),
         //.slot_cfg = I2S_STD_MSB_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_32BIT, channel_fmt), //this mode seemed to work for SPH0645
         .slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_32BIT, channel_fmt), // this is needed for INMP441
         .gpio_cfg = {
-            .mclk = I2S_GPIO_UNUSED,    // some codecs may require mclk signal, this example doesn't need it
+            .mclk = I2S_GPIO_UNUSED,
             .bclk = I2S_GPIO_BCLK,
             .ws   = I2S_GPIO_WS,
             .dout = I2S_GPIO_DOUT,
@@ -135,61 +114,7 @@ esp_err_t bsp_i2s_reconfig(uint32_t sample_rate)
     return ret_val;
 }
 
-/*
- This filter is an implementation of a 1st-order filter described in 
- https://docs.xilinx.com/v/u/en-US/wp279
 
- Data out of SPH645 has a significant -ve offset, which this high-pass filter attempts
- to filter out. 32bit raw_sample has 18bits of actual sample (in case of SPH645) in MSB aligned way.
- 24bits of raw_data for INMP441 also is MSB aligned in 32bit, but it has no such offset.
- The last operand 'reset' can be set to 'true' to bypass the filtering operation.
- 'reset' set to 'true' also resets the accumulator within the filter. This function needs 
- to be called once with 'reset' = 'true' before start of the filtering operation.
-
- The processed samples are returned in the same variable but as 16bit LSB aligned value.
- 
- For faster settling of offset value, FILTER_RESPONSE_MULTIPLIER may be increased.
- The equivalent time constant (RC) = SAMPLING_PERIOD*2^(32-MIC_RESOLUTION-FILTER_RESPONSE_MULTIPLIER)
- For example, for fs=16kHz, MIC_RESOLUTION=18, and FILTER_RESPONSE_MULTIPLIER=0, 
- the time constant is 2^14/16000 ~= 1 second. Note that the reduction in time constant
- is in power of 2 for every increase in FILTER_RESPONSE_MULTIPLIER.
-
-*/
-#define  FILTER_RESPONSE_MULTIPLIER 2
-#define  BIT_MASK ((0xFFFFFFFFUL)<<(32-MIC_RESOLUTION))
-/* For highpass filtering (offset cancellation) call with reset=True once to initialize the 
-   filter and with reset=false for subsequet calls. If no offset cancellation is required,
-   call this function with reset=true all the times.
-*/
-void decode_and_cancel_offset(int32_t *left_sample_p, int32_t *right_sample_p, bool reset)
-{
-    static int32_t l_offset = 0;  // offset for L channel; (state of the filter)
-    static int32_t r_offset = 0;  // offset for R channel; (state of the filter)
-    int32_t final_value;
-
-    if(reset){
-        l_offset = 0;
-        r_offset = 0;
-    }
-    if(left_sample_p != NULL)
-    {
-        final_value = (*left_sample_p & BIT_MASK) - (l_offset & BIT_MASK);
-        *left_sample_p = mul_1p31x8p24(final_value,mic_gain[0]);
-        l_offset += (*left_sample_p) << FILTER_RESPONSE_MULTIPLIER;
-    }
-
-    if(right_sample_p != NULL)
-    {
-        final_value = (*right_sample_p & BIT_MASK)  - (r_offset & BIT_MASK);
-        *right_sample_p = mul_1p31x8p24(final_value,mic_gain[1]);
-        r_offset += (*right_sample_p) << FILTER_RESPONSE_MULTIPLIER;
-    }
-}
-
-
-#define OFFSET 1000
-
-#ifdef I2S_INTERNAL_SOURCE
 extern uint32_t sampFreq;
 /*
 T = 16000 // 62.5uS in .8 format for fs=16kHz
@@ -204,13 +129,18 @@ T =  5805 // 22.68uS in .8 format for fs=44.1kHz
 #define HALF_PERIOD_100HZ 1280000 /* in 0.8 format*/
 #define SIGNAL_HALF_PERIOD HALF_PERIOD_220HZ
 /*
+  This function is called by tud_audio_tx_done_post_load_cb(). 
+  It reads 32bits raw data for both left and right channels from I2S DMA buffers, 
+  gets upper 24bits LSB aligned. After amplification, 16 bits are returned in 
+  data_buf. count is the requested number of bytes. Actual number of bytes read is 
+  returned.
+*/
+/*
   This function feeds synthetic data (sinusoid) to the receive channel 
   bypassing actual I2S receiver.
 */
 uint16_t bsp_i2s_read(void *data_buf, uint16_t count /* bytes*/)
 {
-    // lets assume fs=16kHz; so sample period is 1/16 mS or more generally T=1/fs s
-    // Let us assume frequency of the square wave that we want to produce is 441Hz (f).
     int16_t *out_buf = (int16_t*)data_buf;
 
     int32_t T = getPeriod(sampFreq);
@@ -231,105 +161,6 @@ uint16_t bsp_i2s_read(void *data_buf, uint16_t count /* bytes*/)
     return count;
 
 }
-/*
-uint16_t bsp_i2s_read(void *data_buf, uint16_t count)
-{
-    static int tabl_idx = 0;
-    int L = sin_tabl_len;
-    int i ;
-    int32_t val;
-    static int64_t t_earlier = 0;
-    struct timeval tv_now;
-    //for(i=0; i< i2s_read_buflen; i+=4, tabl_idx++)
-    for(i=0; i< count; i+=2, tabl_idx++)
-    {
-        // The sin_table has sin_tabl_len (L) number of equally spaced entries between 0 and pi/2.
-        // The table is read 0,1,...(L-1),L,(L-1),..0,1,..(L-1),L,(L-1)...1 order for a full
-        // cycle of sin curve. For latter half, the sign of the value is reversed.
-        if(tabl_idx > 39) tabl_idx = 0;
-             if (tabl_idx < L)        val =  sin_qtr[tabl_idx];
-        else if (tabl_idx <(L-1)*2+1) val =  sin_qtr[(L-1)*2-tabl_idx];
-        else if (tabl_idx <(L-1)*3+1) val = -sin_qtr[tabl_idx-(L-1)*2];
-        else                          val = -sin_qtr[(L-1)*4-tabl_idx];
-
-        val += OFFSET;
-        val <<= (32-MIC_RESOLUTION);
-        decode_and_cancel_offset(&val, NULL, false);
-
-        // left and right channels are being given the same values
-        *(data_buf+i)   = val;
-        *(data_buf+i+1) = val;
-    }
-
-    gettimeofday(&tv_now, NULL);
-    int64_t t_now = (int64_t)tv_now.tv_sec * 1000000L + (int64_t)tv_now.tv_usec;
-    if((t_now - t_earlier) < 1000) { 
-        ets_delay_us(1000-(t_now-t_earlier));			//Stalls execution for #uS
-        t_earlier += 1000;
-    }
-    else  // probably first time
-        t_earlier = t_now ;  
-
-    return count;
-}
-*/
-#else
-
-/*
-  This function is called by tud_audio_tx_done_post_load_cb(). 
-  It reads 32bits raw data for both left and right channels from I2S DMA buffers, 
-  gets upper 24bits LSB aligned. After amplification, 16 bits are returned in 
-  data_buf. count is the requested number of bytes. Actual number of bytes read is 
-  returned.
-*/
-uint16_t bsp_i2s_read(void *data_buf, uint16_t count)
-{
-    // t_i2s ++;
-    int16_t *out_buf = (int16_t*)data_buf;
-    static size_t  n_bytes;
-    static int32_t d_left, d_right;
-
-    uint16_t i = 0;
- 
-    while (i<count/2) {     // i keeps count of number of int16_t types processed into out_buf
-        n_bytes = 0;
-        if(i2s_channel_read(rx_handle,rx_sample_buf, rx_sample_buflen, &n_bytes, 200) == ESP_OK) {
-            // i2s_channel_read is blocking; it is expected to block till it gets enough number of
-            // bytes (e.g., 128 bytes for 16KHz sampling rate every ms). This should keep time.
-            //assert(rx_sample_buflen==n_bytes);
-            if(rx_sample_buflen != n_bytes)
-            printf("rx_sample_buflen : %d, n_bytes: %d\n", rx_sample_buflen, n_bytes);
-            size_t j = 0;
-            while(j < n_bytes) {
-                if((n_bytes - j) >= 8) {
-                    memcpy(&d_left,(rx_sample_buf+j),4);
-                    memcpy(&d_right,(rx_sample_buf+j+4),4);
-
-                    decode_and_cancel_offset(&d_left, &d_right, true); // true: no offset cancelling; just the shifting 
-                    *(out_buf+i)   = d_left;
-                    *(out_buf+i+1) = d_right;
-                    i += 2;
-                    j += 8;
-                }
-                else {
-                    // we have a problem
-                    printf("%u : i2s_read_buffer failed (only %d bytes available; expected 8)\r\n", xthal_get_ccount(),(n_bytes-j));
-                    break;
-                }
-            }
-            assert(i<=count);
-        }
-        else {
-            printf("i2s_channel_read failed \r\n");
-            break;
-        }
-    } 
-
-    if(i*2 < count)
-    ESP_LOGI(TAG,"returning %d bytes; was asked for %d bytes",i*2,count);
-    return i*2;
-}
-#endif
 
 /*
   This function formats the data (16 bits to MSB aligned 32 bits etc..) using a local buffer
@@ -352,45 +183,25 @@ void bsp_i2s_write(void *data_buf, uint16_t n_bytes){
 
     size_t num_bytes = 0;
 
-    // convert 16 bits to 32 bits (MSB aligned)
-      while (src < limit)
+      while (src<limit)
       {
-        data = (int32_t)(int16_t)(*src++)<<16;  // MSB aligning
-        *dst++ = data;
-        if(CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_RX == 1 /* single channel*/)
-            // copy the same data to both channels. NOTE This will depend on how the speaker is wired to I2S bus
-            *dst++ = data;
-      }
-      //assert(dst <= &tx_sample_buf[CFG_TUD_AUDIO_FUNC_1_EP_OUT_SW_BUF_SZ/2-1]);
-
-      if(CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_RX == 1 /* single channel*/) {
-        // total number of bytes in tx_sample_buf is count*4 since each 16bit sample in data_buf
-        // made into a 32bit value and then replicated in both left and right channel.
-
-        ESP_ERROR_CHECK(i2s_channel_write(tx_handle,tx_sample_buf, n_bytes*4, &num_bytes, 200)) ;
+        //COPY *src to *dst converting 16bits to 32 bit in MSB aligned way
 
       }
-      else {
+
+        // USE i2s_channel_write() to copy the buffer to TX DMA buffers
         // total number of bytes in tx_sample_buf is count*2 since each 16bit sample in data_buf
         // made into a 32bit value.
 
-        log_txbytes(n_bytes*2);
-        ESP_ERROR_CHECK(i2s_channel_write(tx_handle,tx_sample_buf, n_bytes*2, &num_bytes, 200)) ;
-
-      }
 }
 
 static void speaker_amp (int16_t *s, size_t nframes, int32_t gain[] ){
     //int16_t *t = s;
     if(nframes == 0) return;
-    int32_t sig;
+
     for(int i=0; i<nframes; i++){
-        sig = ((int32_t)*s)<<16;
-        *s = mul_1p31x8p24(sig, gain[0]);
-        s++;
-        sig = ((int32_t)*s)<<16;
-        *s = mul_1p31x8p24(sig, gain[1]);
-        s++;
+        // MULTIPLY signal with gain - gain[0] for left channel, gain[1] for right channel
+        // USE mul_1p31x8p24() for this OR simply use bit left shift 
     }
 }
 
@@ -418,19 +229,10 @@ extern size_t s_spk_bytes_ms;
 
 /* Checks of there is multiple of a frame's worth data is available to be read at EPOUT fifo */
 uint16_t adequate_data_at_epout(){
-#ifdef I2S_INTERNAL_SOURCE
-    return s_spk_bytes_ms; // this only when we are using an internal source
-#endif
-    uint16_t n_bytes = tud_audio_available();
-    if(n_bytes == 0 ) {
-        //ESP_LOGI(TAG,"0 bytes available to be read at EPOUT fifo");
-        return 0;
-    }
-    if(n_bytes != ((n_bytes>>CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_RX)<<CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_RX)) {
-        ESP_LOGI(TAG,"%d bytes available at EPOUT fifo (not multiples of one frame worth bytes)", n_bytes);
-        //vTaskDelay(pdMS_TO_TICKS(1));
-        return 0;
-    }
+    uint16_t n_bytes = 0;
+    // USE 'uint16_t tud_audio_available()' for checking if there are enough bytes at the 
+    // USB EPOUT fifo. Enough means non-zero and also multiple of one frame's worth data
+    // If this checks out, RETURN number of bytes available or 0
     return n_bytes;
 }
 
@@ -443,62 +245,7 @@ void i2s_transmit() {
         vTaskDelay(pdMS_TO_TICKS(10));
         return;
     }
-        //data_out_buf_cnt = tud_audio_read(data_out_buf, n_bytes);
-        data_out_buf_cnt = (*i2s_get_data)(data_out_buf, n_bytes);
-        if (data_out_buf_cnt < s_spk_bytes_ms) {
-            // Normally we should never land here unless the host is really busy.
-            ESP_LOGI(TAG,"Only %d bytes available; expecting >= %d bytes",data_out_buf_cnt,s_spk_bytes_ms);
-            vTaskDelay(pdMS_TO_TICKS(1));
-        }   
-
-        // make sure that data_out_buf_cnt is a multiple of 2*CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_RX
-        /*
-        if(data_out_buf_cnt != ((data_out_buf_cnt>>CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_RX)<<CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_RX))
-        {
-            ESP_LOGI(TAG,"tud_audio_read returned %d bytes (not multiples of one frame worth bytes)", data_out_buf_cnt);
-        }    
-        */
-        speaker_amp((int16_t *)data_out_buf, data_out_buf_cnt/(2*CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_RX), spk_gain);
-
-#ifdef DISPLAY_STATS
-        spk_bytes_available_ary[data_out_buf_cnt]++;
-#endif
-
-        if(data_out_buf_cnt > 0)
-            bsp_i2s_write(data_out_buf, data_out_buf_cnt);
-        else
-            vTaskDelay(pdMS_TO_TICKS(1));
-}
-
-/* This function is meant to be run as a task. It repeatedly calls a producer 
-    function (i2s_get_data()) to get data and sends it along to I2S DMA.
-    The 'active' flag is to force the loop to introduce a delay. Otherwise, 
-    the loop spins too fast without a break and trips the watchdog timer.
-*/
-void i2s_consumer_func_task(bool *active){
-
-    /* running flag is used to delay the start of reading the producer FIFOs. 
-       Without a delay (*i2s_get_data)() starts reading the FIFO immediately
-       and returns with 0 bytes and ends up spinning too fast to trip the WDT.
-       With this delay, USB FIFO's is guaranteed to accumulate some data in the
-       beginning and is expected to always run ahead of the reading function.
-    */
-    static bool running = false;
-    while(1){
-        if (*active == false) {
-            // reset the 'running' flag when the channel is closed
-            running = false;
-            //ulTaskNotifyTake(pdFAIL, portMAX_DELAY);
-            // check after some delay (100ms) not to block the CPU
-            vTaskDelay(100/portTICK_PERIOD_MS); 
-            continue;
-        }
-        else if(running == false) {
-            // get to 'running' after some delay so that the following
-            // read function gets called after some data accumulates in USB FIFO.
-            vTaskDelay(50/portTICK_PERIOD_MS);
-            running = true;
-        }
-        i2s_transmit();
-    }
+    //USE 'uint16_t tud_audio_read(void *buf, uint16_t n_bytes) to read data from EPOUT buffer
+    //may USE speaker_amp() to amplify the signal (i.e., volume control)
+    //USE 'bsp_i2s_write(void *buf, uint16_t n_bytes)' to write to I2S TX DMA buffer
 }

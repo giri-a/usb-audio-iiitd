@@ -1,8 +1,3 @@
-/*
- * Adapted from skainet code : 
- * https://github.com/espressif/esp-skainet/tree/master/examples/usb_mic_recorder
- * discussed in https://github.com/espressif/esp-idf/issues/12774 
-*/
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "tusb.h"
