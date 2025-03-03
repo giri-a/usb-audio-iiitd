@@ -186,8 +186,10 @@ uint16_t bsp_i2s_read(void *data_buf/*16 bit samples*/, uint16_t count /* bytes*
                     memcpy(&d_left,rx_sample_buf+j,4);
                     memcpy(&d_right,rx_sample_buf+j+4,4);
                     j+=8;
-                    out_buf[i++] = d_left >> 14;
-                    out_buf[i++] = d_right >> 14;
+                    d_left = mul_1p31x8p24(d_left &((int32_t)-1)<<8, mic_gain[0]);
+                    d_right= mul_1p31x8p24(d_right&((int32_t)-1)<<8, mic_gain[1]);
+                    out_buf[i++] = d_left ;
+                    out_buf[i++] = d_right;
                 }
                 else {
                     // we have a problem because we do not seem to have multiple of one frame's worth data
@@ -248,7 +250,7 @@ void bsp_i2s_write(void *data_buf, uint16_t n_bytes){
 
 }
 
-static void speaker_amp (int16_t *s, size_t nframes, int32_t gain[] ){
+void speaker_amp (int16_t *s, size_t nframes, int32_t gain[] ){
     //int16_t *t = s;
     if(nframes == 0) return;
 
@@ -323,8 +325,8 @@ void i2s_transmit() {
             vTaskDelay(pdMS_TO_TICKS(1));
     }   
     // Let us amplify signals here. spk_gain is calculated in USB stack. But we are not using USB stack yet.
-    spk_gain[0] = 16777216; // 16777216 is 1.0 in 8.24 fixed point format; also 0.25 is 4194304 in the same format
-    spk_gain[1] = 16777216; // 16777216 is 1.0 in 8.24 fixed point format
+    //spk_gain[0] = 16777216; // 16777216 is 1.0 in 8.24 fixed point format; also 0.25 is 4194304 in the same format
+    //spk_gain[1] = 16777216; // 16777216 is 1.0 in 8.24 fixed point format
     speaker_amp((int16_t *)data_out_buf, data_out_buf_cnt/(2*CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_RX), spk_gain);
 
     if(data_out_buf_cnt > 0)
