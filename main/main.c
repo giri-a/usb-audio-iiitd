@@ -47,49 +47,9 @@ int16_t data_out_buf[I2S_DATA_OUT_BUFSIZ] = {0};
 
 TaskHandle_t usb_device_task_handle = NULL; 
 
-/*
-TaskHandle_t spk_task_handle = NULL; 
-#define GPIO_OUTPUT_PIN_SEL  ((1ULL<<GPIO_NUM_7) |\
-                              (1ULL<<GPIO_NUM_8) |\
-                              (1ULL<<GPIO_NUM_9) |\
-                              (1ULL<<GPIO_NUM_10) )
-
-void init_gpio()
-{
-    //zero-initialize the config structure.
-    gpio_config_t io_conf = {};
-    //disable interrupt
-    io_conf.intr_type = GPIO_INTR_DISABLE;
-    //set as output mode
-    io_conf.mode = GPIO_MODE_OUTPUT;
-    //bit mask of the pins that you want to set,e.g.GPIO18/19
-    io_conf.pin_bit_mask = GPIO_OUTPUT_PIN_SEL;
-    //disable pull-down mode
-    io_conf.pull_down_en = 0;
-    //disable pull-up mode
-    io_conf.pull_up_en = 0;
-    //configure GPIO with the given settings
-    gpio_config(&io_conf);
-}
-*/
-void print_task_stats();
 void app_main()
 {
     BaseType_t ret_val ;
-
-    /* USB out => I2S Speakers; USB in <= I2S Mic */
-    usb_get_data = &bsp_i2s_read;
-    i2s_get_data = &tud_audio_read;
- 
-    /* Use the following for USB loopback and I2S loopback. Comment out the two lines above.*/
-    /* I2S Mic => I2S Speakers ; USB out => USB in */
-    //usb_get_data = &tud_audio_read;
-    //i2s_get_data = &bsp_i2s_read;
-    
-
-    // ESP_LOGI(TAG, "I2S_DATA_IN_BUFSIZ: %d, I2S_DATA_OUT_BUFSIZ: %d", I2S_DATA_IN_BUFSIZ, I2S_DATA_OUT_BUFSIZ);
-
-    //init_gpio();
 
     // Setting up GPIO_1 as input so that we can trigger a txInfodump
     assert(gpio_set_direction(GPIO_NUM_1, GPIO_MODE_INPUT) == ESP_OK);
@@ -102,15 +62,8 @@ void app_main()
 
     // Create a task for tinyusb device stack
 
-    //(void) xTaskCreateStatic( usb_device_task, "usbd", USBD_STACK_SIZE, NULL, configMAX_PRIORITIES - 2, usb_device_stack, &usb_device_taskdef);
-    //ESP_ERROR_CHECK(usb_headset_init());
+/*
     usb_headset_init();
-
-    /* This is for debug. We allocate memory for 12 tasks even before the tasks have been
-       created to avoid a timing issue. I think in this program there will be 
-       IDLE0, IDLE0, esp_timer, timer_svc, ipc0, ipc1, main plus two tasks created below.
-    */
-    // allocate_memory_for_status();
 
     ret_val = xTaskCreatePinnedToCore(usb_device_task, "usb_device_task", 3 * 1024, NULL, 2, &usb_device_task_handle,0);
     if (ret_val != pdPASS) {
@@ -119,44 +72,18 @@ void app_main()
         return;
     }
     ESP_LOGI(TAG, "TinyUSB initialized");
-
-/*
-    ret_val = xTaskCreatePinnedToCore(i2s_consumer_func_task, "i2s_consumer_func", 4*1024, (void*)& s_spk_active, 1, &spk_task_handle, 1);
-    if (ret_val != pdPASS) {
-        ESP_LOGE(TAG, "Failed to create i2s_read_write_task");
-        //return ESP_FAIL;
-        return;
-    }
-    ESP_LOGI(TAG, "I2S started");
 */
+
     configure_led();
 
     blink_state = BLINK_NOT_MOUNTED;
-
-    // print_task_list();
-    txInfoQinit();
 
     bool printed = true;
 
     while(1)
     {
-        //int bytes_left = uxTaskGetStackHighWaterMark(usb_device_task_handle);
-
-        // led_blinking_task();
         drive_led();
-        if(s_spk_active)
-            i2s_transmit();
-        else
-            vTaskDelay(pdMS_TO_TICKS(50));
-        if(gpio_get_level(GPIO_NUM_1) == 0){
-            if(printed == false){
-                printf("GPIO 1 low\n");
-                print_txPacketInfo(0);
-            }
-            printed = true;
-        }
-        else {
-            printed = false;
-        }
+        vTaskDelay(pdMS_TO_TICKS(50));
+
     } 
 }
