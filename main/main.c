@@ -57,9 +57,9 @@ void app_main()
 
     // Create a task for tinyusb device stack
 
-/*
     usb_headset_init();
 
+/*
     ret_val = xTaskCreatePinnedToCore(usb_device_task, "usb_device_task", 3 * 1024, NULL, 2, &usb_device_task_handle,0);
     if (ret_val != pdPASS) {
         ESP_LOGE(TAG, "Failed to create usb_task");
@@ -78,7 +78,10 @@ void app_main()
     while(1)
     {
         drive_led();
-        vTaskDelay(pdMS_TO_TICKS(50));
+        if(gpio_get_level(GPIO_NUM_1) == 1)
+            i2s_transmit();
+        else 
+            vTaskDelay(pdMS_TO_TICKS(50));
 
     } 
 }
