@@ -123,6 +123,7 @@ esp_err_t bsp_i2s_reconfig(uint32_t sample_rate)
 
 
 extern uint32_t sampFreq;
+#ifdef SYNTHETIC
 /*
 T = 16000 // 62.5uS in .8 format for fs=16kHz
 T = 10667 // 41.67uS in .8 format for fs=24kHz
@@ -142,10 +143,12 @@ T =  5805 // 22.68uS in .8 format for fs=44.1kHz
   data_buf. count is the requested number of bytes. Actual number of bytes read is 
   returned.
 */
+
 /*
   This function feeds synthetic data (sinusoid) to the receive channel 
   bypassing actual I2S receiver.
 */
+
 uint16_t bsp_i2s_read(void *data_buf, uint16_t count /* bytes*/)
 {
     int16_t *out_buf = (int16_t*)data_buf;
@@ -168,6 +171,41 @@ uint16_t bsp_i2s_read(void *data_buf, uint16_t count /* bytes*/)
     return count;
 
 }
+#endif
+
+uint16_t bsp_i2s_read(void *data_buf/*16 bit samples*/, uint16_t count /* bytes*/){
+    int32_t d_left, d_right;
+    int16_t *out_buf = (int16_t*)data_buf;
+    size_t n_bytes = 0;
+    int i = 0;
+    while(i < count/2){
+        if(i2s_channel_read(rx_handle,rx_sample_buf,rx_sample_buflen,&n_bytes,200) == ESP_OK) {
+            size_t j = 0;
+            while(j < n_bytes){
+                if(n_bytes - j >= 8){
+                    memcpy(&d_left,rx_sample_buf+j,4);
+                    memcpy(&d_right,rx_sample_buf+j+4,4);
+                    j+=8;
+                    out_buf[i++] = d_left >> 14;
+                    out_buf[i++] = d_right >> 14;
+                }
+                else {
+                    // we have a problem because we do not seem to have multiple of one frame's worth data
+                    ESP_LOGI(TAG,"%d bytes left whereas 8 bytes are needed",(n_bytes-j));
+                    break;
+                }
+            }
+        }
+        else {
+            ESP_LOGI(TAG,"i2s_channel_read returned error!");
+        }
+    }
+    if(i*2 < count){
+        ESP_LOGI(TAG,"Returning %d bytes, asked for %d bytes",i*2,count);
+    }
+    return i*2;
+}
+
 
 /*
   This function formats the data (16 bits to MSB aligned 32 bits etc..) using a local buffer
