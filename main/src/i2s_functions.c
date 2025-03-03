@@ -29,11 +29,9 @@ static int32_t tx_sample_buf [CFG_TUD_AUDIO_FUNC_1_EP_OUT_SW_BUF_SZ/2];
 
 extern int32_t mic_gain[2];
 extern int32_t spk_gain[2];
-
-// For documentation of I2S on ESP32 chips and how to configure it, check out documentation at
-// https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/peripherals/i2s.html
-// We'll configure the I2S port in full-duplex mode. Scroll down to about one-third of the page
-// for an example. The following code is almost same with some small modifications.
+#ifdef DISPLAY_STATS
+extern size_t spk_bytes_available_ary[];
+#endif
 
 esp_err_t bsp_i2s_init(i2s_port_t i2s_num, uint32_t sample_rate)
 {
