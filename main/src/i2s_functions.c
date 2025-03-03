@@ -29,9 +29,13 @@ static int32_t tx_sample_buf [CFG_TUD_AUDIO_FUNC_1_EP_OUT_SW_BUF_SZ/2];
 
 extern int32_t mic_gain[2];
 extern int32_t spk_gain[2];
-#ifdef DISPLAY_STATS
-extern size_t spk_bytes_available_ary[];
-#endif
+
+/* For I2S on ESP32 info and how to configure it, please see the documentation at
+   https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/peripherals/i2s.html .
+   We'll use full-duplex mode of I2S.  About one-third down that page you'll find some example code. 
+   The following function reuses that code with some modifications.
+*/
+
 
 esp_err_t bsp_i2s_init(i2s_port_t i2s_num, uint32_t sample_rate)
 {
@@ -112,7 +116,7 @@ esp_err_t bsp_i2s_reconfig(uint32_t sample_rate)
     //ret_val |= i2s_channel_enable(rx_handle);
 
     // init the offset canceller filter on the read channel
-    decode_and_cancel_offset(NULL, NULL, true);
+    //decode_and_cancel_offset(NULL, NULL, true);
     
     return ret_val;
 }
