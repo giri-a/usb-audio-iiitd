@@ -81,10 +81,6 @@ void app_main()
     {
         drive_led();
 
-        if(gpio_get_level(GPIO_NUM_1) == 1){
-            i2s_transmit();
-        }
-        else 
             vTaskDelay(pdMS_TO_TICKS(50));
 
     } 

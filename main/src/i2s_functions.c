@@ -186,29 +186,10 @@ void bsp_i2s_write(void *data_buf, uint16_t n_bytes){
      * bytes (each data is 16bits) will produce (N/2)*2=N 32bits total o/p samples for L+R  
      */
 
-    int16_t *src   = (int16_t *)data_buf;
-    int16_t *limit = (int16_t *)data_buf + n_bytes/2 ;
-    int32_t *dst   = tx_sample_buf;
-
-    size_t num_bytes = 0;
-
-      while (src<limit)
-      {
-        //COPY *src to *dst converting 16bits to 32 bit in MSB aligned way
-        *dst = (int32_t)(*src)<<16;
-        dst++; src++;
-      }
 
     // USE i2s_channel_write() to copy the buffer to TX DMA buffers
     // Total number of bytes in tx_sample_buf is n_bytes*2 since each 16bit sample in 
     // data_buf made into a 32bit value.
-    if(i2s_channel_write(tx_handle, tx_sample_buf,n_bytes*2,&num_bytes,200) != ESP_OK) {
-        ESP_LOGI(TAG,"Some problem writing to TX buffers");
-    }
-    if(num_bytes < n_bytes*2){
-        // Timed out? may be.. issue a message
-        ESP_LOGI(TAG,"Timed out? Some problem writing to TX buffers");
-    }
 
 }
 
@@ -224,11 +205,7 @@ extern size_t s_spk_bytes_ms;
 */
 
 void i2s_transmit() {
-    // Read s_spk_bytes_ms only even if more bytes may be available
-    data_out_buf_n_bytes = bsp_i2s_read(data_out_buf, s_spk_bytes_ms); // data_out_buf etc. are declared in main.c
+    // READ s_spk_bytes_ms by calling bsp_i2s_read() which provides synthetic data for now
 
-    if(data_out_buf_n_bytes > 0)
-        bsp_i2s_write(data_out_buf, data_out_buf_n_bytes);
-    else
-        vTaskDelay(pdMS_TO_TICKS(1));
+    // USE bsp_i2s_write() to format 16bits to 32bits and send to DMA
 }
