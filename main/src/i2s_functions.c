@@ -8,9 +8,6 @@
 #include "esp_task_wdt.h"
 #include "utilities.h"
 
-#define MIC_RESOLUTION      24
-#define GAIN                4      // in bits i.e., 1 =>2, 2=>4, 3=>8 etc.
-
 static const char* TAG = "i2s_functions";
 
 static i2s_chan_handle_t                tx_handle = NULL;        // I2S tx channel handler
@@ -116,7 +113,7 @@ esp_err_t bsp_i2s_reconfig(uint32_t sample_rate)
 
 
 extern uint32_t sampFreq;
-#ifdef SYNTHETIC
+
 /*
 T = 16000 // 62.5uS in .8 format for fs=16kHz
 T = 10667 // 41.67uS in .8 format for fs=24kHz
@@ -178,50 +175,10 @@ uint16_t bsp_i2s_read(void *data_buf, uint16_t count /* bytes*/)
     return count;
 
 }
-#endif
-
-uint16_t bsp_i2s_read(void *data_buf/*16 bit samples*/, uint16_t count /* bytes*/){
-    int32_t d_left, d_right;
-    int16_t *out_buf = (int16_t*)data_buf;
-    size_t n_bytes = 0;
-    int i = 0;
-    while(i < count/2){
-        if(i2s_channel_read(rx_handle,rx_sample_buf,rx_sample_buflen,&n_bytes,200) == ESP_OK) {
-            size_t j = 0;
-            while(j < n_bytes){
-                if(n_bytes - j >= 8){
-                    memcpy(&d_left,rx_sample_buf+j,4);
-                    memcpy(&d_right,rx_sample_buf+j+4,4);
-                    j+=8;
-                    d_left = d_left >> 14;
-                    d_right= d_right >> 14;
-                    out_buf[i++] = d_left ;
-                    out_buf[i++] = d_right;
-                }
-                else {
-                    // we have a problem because we do not seem to have multiple of one frame's worth data
-                    ESP_LOGI(TAG,"%d bytes left whereas 8 bytes are needed",(n_bytes-j));
-                    break;
-                }
-            }
-        }
-        else {
-            ESP_LOGI(TAG,"i2s_channel_read returned error!");
-        }
-    }
-    if(i*2 < count){
-        ESP_LOGI(TAG,"Returning %d bytes, asked for %d bytes",i*2,count);
-    }
-    return i*2;
-}
 
 /*
   This function formats the data (16 bits to MSB aligned 32 bits etc..) using a local buffer
   tx_sample_buf and writes to the I2S DMA buffer to be sent out over I2S.
-  Each sample in tx_sample_buf is int32_t type. For an incoming (i.e. from host) stereo stream,
-  tx_sample_buf needs to be n_bytes/2 * 32-bit. 
-  Max val of n_bytes is CFG_TUD_AUDIO_FUNC_1_EP_OUT_SW_BUF_SZ (see uad_callbacks.c).
-  This function is called by audio_consumer_func() task.
 */
 void bsp_i2s_write(void *data_buf, uint16_t n_bytes){
 
@@ -255,16 +212,6 @@ void bsp_i2s_write(void *data_buf, uint16_t n_bytes){
 
 }
 
-void speaker_amp (int16_t *s, size_t nframes, int32_t gain[] ){
-
-    if(nframes == 0) return;
-
-    for(int i=0; i<nframes; i++){
-        // MULTIPLY signal with gain - gain[0] for left channel, gain[1] for right channel
-        // USE mul_1p31x8p24() for this OR simply use bit left shift 
-    }
-}
-
 /* The following variable is declared in tinyusb stack. Its value indicates the number of
    bytes present in 1mS frame of the audio data. Its value is set in one of the functions of 
    the tinyusb stack based on sampling frequency, number of channels (fixed at 2 now) and
@@ -273,46 +220,12 @@ void speaker_amp (int16_t *s, size_t nframes, int32_t gain[] ){
 */
 extern size_t s_spk_bytes_ms;
 
-/* Before calling tud_audio_read(), we would like to make sure that we have more than 1mS
-   worth data that is also a multiple of a frame's worth data (4 bytes for 16bit stereo)
-   is available in the USB EPOUT fifo. 
+/* We get s_spk_bytes_ms bytes from our data generator every time; which good for 1mS
 */
 
-uint16_t adequate_data_at_epout(){
-
-    // USE 'uint16_t tud_audio_available()' for checking if there are enough bytes at the 
-    // USB EPOUT fifo. Enough means non-zero and also multiple of one frame's worth data
-    // If this checks out, RETURN number of bytes available or 0
-    uint16_t n_bytes = s_spk_bytes_ms;
-
-    return n_bytes;
-}
-
 void i2s_transmit() {
-    uint16_t n_bytes ;
-    if((n_bytes = adequate_data_at_epout()) == 0){
-        // We are likely to come here at the start of streaming when the epout buffer
-        // may be short of data. So we wait here for longer to have some data buffered
-        // rather than regularly running short and starve I2S DMA.
-        vTaskDelay(pdMS_TO_TICKS(10));
-        return;
-    }
-    //USE 'uint16_t tud_audio_read(void *buf, uint16_t n_bytes) to read data from EPOUT buffer
-    //may USE speaker_amp() to amplify the signal (i.e., volume control)
-    //USE 'bsp_i2s_write(void *buf, uint16_t n_bytes)' to write to I2S TX DMA buffer
-    //Read s_spk_bytes_ms only even if more bytes may be available
-    data_out_buf_n_bytes = bsp_i2s_read(data_out_buf, n_bytes); // data_out_buf etc. are declared in main.c
-    if (data_out_buf_n_bytes < s_spk_bytes_ms) {
-            // Normally we should never land here unless the host is really busy.
-            ESP_LOGI(TAG,"Only %d bytes available; expecting >= %d bytes",data_out_buf_n_bytes,s_spk_bytes_ms);
-            vTaskDelay(pdMS_TO_TICKS(1));
-    }   
-    // Let us amplify signals here. spk_gain is calculated in USB stack. But we are not using USB stack yet.
-    spk_gain[0] = 16777216; // 16777216 is 1.0 in 8.24 fixed point format; also 0.25 is 4194304 in the same format
-    spk_gain[1] = 16777216; // 16777216 is 1.0 in 8.24 fixed point format
-    // Use a function like speaker_amp(int16_t buf[], size_t nframes, int32_t gain[]) for amplification
-
-    //log_txbytes(data_out_buf_n_bytes);
+    // Read s_spk_bytes_ms only even if more bytes may be available
+    data_out_buf_n_bytes = bsp_i2s_read(data_out_buf, s_spk_bytes_ms); // data_out_buf etc. are declared in main.c
 
     if(data_out_buf_n_bytes > 0)
         bsp_i2s_write(data_out_buf, data_out_buf_n_bytes);
