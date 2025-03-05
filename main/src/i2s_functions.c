@@ -193,8 +193,8 @@ uint16_t bsp_i2s_read(void *data_buf/*16 bit samples*/, uint16_t count /* bytes*
                     memcpy(&d_left,rx_sample_buf+j,4);
                     memcpy(&d_right,rx_sample_buf+j+4,4);
                     j+=8;
-                    d_left = mul_1p31x8p24(d_left & (uint32_t)0xffffff00, mic_gain[0]);
-                    d_right= mul_1p31x8p24(d_right& (uint32_t)0xffffff00, mic_gain[1]);
+                    d_left = d_left >> 14;
+                    d_right= d_right >> 14;
                     out_buf[i++] = d_left ;
                     out_buf[i++] = d_right;
                 }
@@ -262,10 +262,6 @@ void speaker_amp (int16_t *s, size_t nframes, int32_t gain[] ){
     for(int i=0; i<nframes; i++){
         // MULTIPLY signal with gain - gain[0] for left channel, gain[1] for right channel
         // USE mul_1p31x8p24() for this OR simply use bit left shift 
-        *s = mul_1p31x8p24(((int32_t)*s)<<16,gain[0]);
-        s++;
-        *s = mul_1p31x8p24(((int32_t)*s)<<16,gain[1]);
-        s++;
     }
 }
 
@@ -287,16 +283,8 @@ uint16_t adequate_data_at_epout(){
     // USE 'uint16_t tud_audio_available()' for checking if there are enough bytes at the 
     // USB EPOUT fifo. Enough means non-zero and also multiple of one frame's worth data
     // If this checks out, RETURN number of bytes available or 0
-    uint16_t n_bytes = tud_audio_available();
-    if(n_bytes == 0 ) {
-        ESP_LOGI(TAG,"0 bytes available to be read at EPOUT fifo");
-        return 0;
-    }
-    if(n_bytes != ((n_bytes>>CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_RX)<<CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_RX)) {
-        ESP_LOGI(TAG,"%d bytes available at EPOUT fifo (not multiples of one frame worth bytes)", n_bytes);
-        //vTaskDelay(pdMS_TO_TICKS(1));
-        return 0;
-    }
+    uint16_t n_bytes = s_spk_bytes_ms;
+
     return n_bytes;
 }
 
@@ -312,17 +300,17 @@ void i2s_transmit() {
     //USE 'uint16_t tud_audio_read(void *buf, uint16_t n_bytes) to read data from EPOUT buffer
     //may USE speaker_amp() to amplify the signal (i.e., volume control)
     //USE 'bsp_i2s_write(void *buf, uint16_t n_bytes)' to write to I2S TX DMA buffer
-    if(n_bytes > s_spk_bytes_ms) n_bytes = s_spk_bytes_ms;
-    data_out_buf_n_bytes = tud_audio_read(data_out_buf, n_bytes); // data_out_buf etc. are declared in main.c
+    //Read s_spk_bytes_ms only even if more bytes may be available
+    data_out_buf_n_bytes = bsp_i2s_read(data_out_buf, n_bytes); // data_out_buf etc. are declared in main.c
     if (data_out_buf_n_bytes < s_spk_bytes_ms) {
             // Normally we should never land here unless the host is really busy.
             ESP_LOGI(TAG,"Only %d bytes available; expecting >= %d bytes",data_out_buf_n_bytes,s_spk_bytes_ms);
             vTaskDelay(pdMS_TO_TICKS(1));
     }   
     // Let us amplify signals here. spk_gain is calculated in USB stack. But we are not using USB stack yet.
-    //spk_gain[0] = 16777216; // 16777216 is 1.0 in 8.24 fixed point format; also 0.25 is 4194304 in the same format
-    //spk_gain[1] = 16777216; // 16777216 is 1.0 in 8.24 fixed point format
-    speaker_amp((int16_t *)data_out_buf, data_out_buf_n_bytes/(2*CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_RX), spk_gain);
+    spk_gain[0] = 16777216; // 16777216 is 1.0 in 8.24 fixed point format; also 0.25 is 4194304 in the same format
+    spk_gain[1] = 16777216; // 16777216 is 1.0 in 8.24 fixed point format
+    // Use a function like speaker_amp(int16_t buf[], size_t nframes, int32_t gain[]) for amplification
 
     //log_txbytes(data_out_buf_n_bytes);
 

@@ -60,7 +60,7 @@ void app_main()
 
     // Initialize the number of samples per mS for TX and RX channels
     usb_headset_init();
-
+/*
     // Provide the pointer to the function that the tinyusb stack will call to get I2S mic data.
     usb_get_data = &bsp_i2s_read;
 
@@ -72,7 +72,7 @@ void app_main()
         return;
     }
     ESP_LOGI(TAG, "TinyUSB initialized");
-
+*/
     configure_led();
 
     blink_state = BLINK_NOT_MOUNTED;
@@ -81,7 +81,7 @@ void app_main()
     {
         drive_led();
 
-        if(s_spk_active) {
+        if(gpio_get_level(GPIO_NUM_1) == 1){
             i2s_transmit();
         }
         else 
