@@ -49,6 +49,7 @@ esp_err_t bsp_i2s_init(i2s_port_t i2s_num, uint32_t sample_rate)
     chan_cfg.dma_desc_num = 2;
     // dma_frame_num is changed from dafult value of 240 to reduce latency
     chan_cfg.dma_frame_num = sample_rate/1000;  // number of frames in 1mS; cannot handle sample_rate like 44.1kHz
+    chan_cfg.auto_clear_before_cb = true;       // this flag makes sure that only 0 is sent if no more data is provided
     
     ret_val |= i2s_new_channel(&chan_cfg, &tx_handle, &rx_handle);
 
@@ -83,16 +84,8 @@ esp_err_t bsp_i2s_init(i2s_port_t i2s_num, uint32_t sample_rate)
     assert(rx_sample_buflen <= sizeof(rx_sample_buf));
     // Even though 32 bits for each data samples are read from I2S (for the specific Mic used), only 16 bits
     // per sample is sent out over USB.
-    data_in_buf_cnt   = chan_cfg.dma_frame_num * std_cfg.slot_cfg.slot_mode *2 ;
-    ESP_LOGI(TAG,"rx_sample_buflen: %d, data_in_buf_cnt: %d", rx_sample_buflen, data_in_buf_cnt);
-
-    // preload TX DMA buffer so that upon enabling it does not transmit noise
-    // static int32_t tx_sample_buf [CFG_TUD_AUDIO_FUNC_1_EP_OUT_SW_BUF_SZ/2];
-    size_t n_bytes = 0;
-    for(;n_bytes<CFG_TUD_AUDIO_FUNC_1_EP_OUT_SW_BUF_SZ/2;n_bytes++){
-        tx_sample_buf[n_bytes] = 0;
-    }
-    i2s_channel_preload_data(tx_handle, (void*)tx_sample_buf, n_bytes*4, &n_bytes);
+    data_in_buf_n_bytes   = chan_cfg.dma_frame_num * std_cfg.slot_cfg.slot_mode *2 ;
+    ESP_LOGI(TAG,"rx_sample_buflen: %d, data_in_buf_n_bytes: %d", rx_sample_buflen, data_in_buf_n_bytes);
 
     ret_val |= i2s_channel_enable(tx_handle);
     ret_val |= i2s_channel_enable(rx_handle);
@@ -136,6 +129,8 @@ T =  5805 // 22.68uS in .8 format for fs=44.1kHz
 #define HALF_PERIOD_220HZ 581818 /* in 0.8 format*/
 #define HALF_PERIOD_100HZ 1280000 /* in 0.8 format*/
 #define SIGNAL_HALF_PERIOD HALF_PERIOD_220HZ
+#define SIGNAL_ON_DURATION  256000000L /* 1s or 1000000uS in 0.8 format */
+#define SIGNAL_OFF_DURATION 256000000L /* 1s or 1000000uS in 0.8 format */
 /*
   This function is called by tud_audio_tx_done_post_load_cb(). 
   It reads 32bits raw data for both left and right channels from I2S DMA buffers, 
@@ -145,7 +140,7 @@ T =  5805 // 22.68uS in .8 format for fs=44.1kHz
 */
 
 /*
-  This function feeds synthetic data (sinusoid) to the receive channel 
+  This function feeds synthetic data (square wave) to the receive channel 
   bypassing actual I2S receiver.
 */
 
@@ -156,13 +151,25 @@ uint16_t bsp_i2s_read(void *data_buf, uint16_t count /* bytes*/)
     int32_t T = getPeriod(sampFreq);
     static int16_t sig_value = 16000;
     static int n_samples_from_last_edge = 0;
+    static uint32_t n_samples_from_last_on_edge = 0;
     for(int i = 0; i < count/4; i++){ /* each frame has 4 bytes*/
         if(n_samples_from_last_edge*T > SIGNAL_HALF_PERIOD) {
-            sig_value = sig_value == 1000 ? -1000 : 1000;
+            sig_value = sig_value == 200 ? -200 : 200;
             n_samples_from_last_edge = 0;
         }
         else
             n_samples_from_last_edge ++;
+
+        if(n_samples_from_last_on_edge*T > (SIGNAL_ON_DURATION + SIGNAL_OFF_DURATION)){
+            n_samples_from_last_on_edge  = 0;
+        }
+        else if(n_samples_from_last_on_edge*T > SIGNAL_ON_DURATION){
+            sig_value = 0;
+            n_samples_from_last_on_edge ++;
+        }
+        else 
+            n_samples_from_last_on_edge ++;
+
         *out_buf = sig_value;
         out_buf++;
         *out_buf = sig_value; /*for stereo */
@@ -186,8 +193,8 @@ uint16_t bsp_i2s_read(void *data_buf/*16 bit samples*/, uint16_t count /* bytes*
                     memcpy(&d_left,rx_sample_buf+j,4);
                     memcpy(&d_right,rx_sample_buf+j+4,4);
                     j+=8;
-                    d_left = mul_1p31x8p24(d_left &((int32_t)-1)<<8, mic_gain[0]);
-                    d_right= mul_1p31x8p24(d_right&((int32_t)-1)<<8, mic_gain[1]);
+                    d_left = mul_1p31x8p24(d_left & (uint32_t)0xffffff00, mic_gain[0]);
+                    d_right= mul_1p31x8p24(d_right& (uint32_t)0xffffff00, mic_gain[1]);
                     out_buf[i++] = d_left ;
                     out_buf[i++] = d_right;
                 }
@@ -208,7 +215,6 @@ uint16_t bsp_i2s_read(void *data_buf/*16 bit samples*/, uint16_t count /* bytes*
     return i*2;
 }
 
-
 /*
   This function formats the data (16 bits to MSB aligned 32 bits etc..) using a local buffer
   tx_sample_buf and writes to the I2S DMA buffer to be sent out over I2S.
@@ -226,7 +232,6 @@ void bsp_i2s_write(void *data_buf, uint16_t n_bytes){
     int16_t *src   = (int16_t *)data_buf;
     int16_t *limit = (int16_t *)data_buf + n_bytes/2 ;
     int32_t *dst   = tx_sample_buf;
-    int32_t data;
 
     size_t num_bytes = 0;
 
@@ -235,23 +240,23 @@ void bsp_i2s_write(void *data_buf, uint16_t n_bytes){
         //COPY *src to *dst converting 16bits to 32 bit in MSB aligned way
         *dst = (int32_t)(*src)<<16;
         dst++; src++;
-
       }
 
-        // USE i2s_channel_write() to copy the buffer to TX DMA buffers
-        // total number of bytes in tx_sample_buf is count*2 since each 16bit sample in data_buf
-        // made into a 32bit value.
+    // USE i2s_channel_write() to copy the buffer to TX DMA buffers
+    // Total number of bytes in tx_sample_buf is n_bytes*2 since each 16bit sample in 
+    // data_buf made into a 32bit value.
     if(i2s_channel_write(tx_handle, tx_sample_buf,n_bytes*2,&num_bytes,200) != ESP_OK) {
         ESP_LOGI(TAG,"Some problem writing to TX buffers");
     }
     if(num_bytes < n_bytes*2){
-        // Timed out? may be issue a message
+        // Timed out? may be.. issue a message
+        ESP_LOGI(TAG,"Timed out? Some problem writing to TX buffers");
     }
 
 }
 
 void speaker_amp (int16_t *s, size_t nframes, int32_t gain[] ){
-    //int16_t *t = s;
+
     if(nframes == 0) return;
 
     for(int i=0; i<nframes; i++){
@@ -264,29 +269,19 @@ void speaker_amp (int16_t *s, size_t nframes, int32_t gain[] ){
     }
 }
 
-/* The following function is called by i2s_consumer_func to get data from USB
-  to be sent to the I2S transmit DMA buffer.
-  This function is expected to populate 'count' number of bytes in the buffer
-  (pointed to by data_buf). It may occasionally send fewer bytes. The number of 
-  bytes actually filled in the buffer is returned.
-*/
-uint16_t (*i2s_get_data)(void *data_buf, uint16_t count);
-
-/* Each call of (*i2s_get_data)() requests 's_spk_bytes_ms' bytes from
-   the USB. Value of this variable is set based on sampling frequency etc..
-   in the USB related functions.
+/* The following variable is declared in tinyusb stack. Its value indicates the number of
+   bytes present in 1mS frame of the audio data. Its value is set in one of the functions of 
+   the tinyusb stack based on sampling frequency, number of channels (fixed at 2 now) and
+   number of bytes in each audio sample (fixed at 2 now). Each call of tud_audio_read() 
+   requests 's_spk_bytes_ms' bytes from the USB. 
 */
 extern size_t s_spk_bytes_ms;
 
-/* This function reads USB EPOUT fifo and writes to I2S tx DMA. Before reading the EPOUT
-   fifo, it is made sure that a mutiple of a frame's woth bytes (4 bytes for stereo) are
-   available in the fifo. Normally, we would expect a mS worth bytes are available but it
-   is not insisted on - only a warning is issued.
-   Data are put through a gain stage before calling a formatting cum writing function 
-   to I2S TX channel.
+/* Before calling tud_audio_read(), we would like to make sure that we have more than 1mS
+   worth data that is also a multiple of a frame's worth data (4 bytes for 16bit stereo)
+   is available in the USB EPOUT fifo. 
 */
 
-/* Checks of there is multiple of a frame's worth data is available to be read at EPOUT fifo */
 uint16_t adequate_data_at_epout(){
 
     // USE 'uint16_t tud_audio_available()' for checking if there are enough bytes at the 
@@ -294,7 +289,7 @@ uint16_t adequate_data_at_epout(){
     // If this checks out, RETURN number of bytes available or 0
     uint16_t n_bytes = tud_audio_available();
     if(n_bytes == 0 ) {
-        //ESP_LOGI(TAG,"0 bytes available to be read at EPOUT fifo");
+        ESP_LOGI(TAG,"0 bytes available to be read at EPOUT fifo");
         return 0;
     }
     if(n_bytes != ((n_bytes>>CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_RX)<<CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_RX)) {
@@ -317,20 +312,22 @@ void i2s_transmit() {
     //USE 'uint16_t tud_audio_read(void *buf, uint16_t n_bytes) to read data from EPOUT buffer
     //may USE speaker_amp() to amplify the signal (i.e., volume control)
     //USE 'bsp_i2s_write(void *buf, uint16_t n_bytes)' to write to I2S TX DMA buffer
-
-    data_out_buf_cnt = tud_audio_read(data_out_buf, n_bytes); // data_out_buf etc. are declared in main.c
-    if (data_out_buf_cnt < s_spk_bytes_ms) {
+    if(n_bytes > s_spk_bytes_ms) n_bytes = s_spk_bytes_ms;
+    data_out_buf_n_bytes = tud_audio_read(data_out_buf, n_bytes); // data_out_buf etc. are declared in main.c
+    if (data_out_buf_n_bytes < s_spk_bytes_ms) {
             // Normally we should never land here unless the host is really busy.
-            ESP_LOGI(TAG,"Only %d bytes available; expecting >= %d bytes",data_out_buf_cnt,s_spk_bytes_ms);
+            ESP_LOGI(TAG,"Only %d bytes available; expecting >= %d bytes",data_out_buf_n_bytes,s_spk_bytes_ms);
             vTaskDelay(pdMS_TO_TICKS(1));
     }   
     // Let us amplify signals here. spk_gain is calculated in USB stack. But we are not using USB stack yet.
     //spk_gain[0] = 16777216; // 16777216 is 1.0 in 8.24 fixed point format; also 0.25 is 4194304 in the same format
     //spk_gain[1] = 16777216; // 16777216 is 1.0 in 8.24 fixed point format
-    speaker_amp((int16_t *)data_out_buf, data_out_buf_cnt/(2*CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_RX), spk_gain);
+    speaker_amp((int16_t *)data_out_buf, data_out_buf_n_bytes/(2*CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_RX), spk_gain);
 
-    if(data_out_buf_cnt > 0)
-        bsp_i2s_write(data_out_buf, data_out_buf_cnt);
+    //log_txbytes(data_out_buf_n_bytes);
+
+    if(data_out_buf_n_bytes > 0)
+        bsp_i2s_write(data_out_buf, data_out_buf_n_bytes);
     else
         vTaskDelay(pdMS_TO_TICKS(1));
 }

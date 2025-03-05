@@ -284,7 +284,7 @@ bool tud_audio_set_itf_cb(uint8_t rhport, tusb_control_request_t const * p_reque
         //rx_bytes_required = (CFG_TUD_AUDIO_FUNC_1_EP_OUT_SW_BUF_MS - 1) * s_spk_bytes_ms;
         s_spk_active = true;
         // Clear buffer when streaming format is changed
-        data_out_buf_cnt = 0;
+        data_out_buf_n_bytes = 0;
         //xTaskNotifyGive(spk_task_handle);
         TU_LOG1("Speaker interface %d-%d opened (%d bits)\n", itf, alt, s_spk_resolution);
         ESP_LOGI(TAG,"Speaker interface %d opened (alt=%d) : %d bits @%lu Hz", itf, alt, s_spk_resolution,sampFreq);
@@ -701,14 +701,14 @@ bool tud_audio_tx_done_pre_load_cb(uint8_t rhport, uint8_t itf, uint8_t ep_in, u
     (void) cur_alt_setting;
 
     /*** Here to send audio buffer, only use in audio transmission begin ***/
-    if(data_in_buf_cnt > 0) {
-        tud_audio_write(data_in_buf, data_in_buf_cnt);
+    if(data_in_buf_n_bytes > 0) {
+        tud_audio_write(data_in_buf, data_in_buf_n_bytes);
 #ifdef DISPLAY_STATS
-        mic_bytes_sent_ary[data_in_buf_cnt]++;
+        mic_bytes_sent_ary[data_in_buf_n_bytes]++;
 #endif
     }
     else {
-        ESP_LOGI(TAG,"tud_audio_tx_done_pre_load_cb: data_in_buf_cnt: %d",data_in_buf_cnt);
+        ESP_LOGI(TAG,"tud_audio_tx_done_pre_load_cb: data_in_buf_n_bytes: %d",data_in_buf_n_bytes);
     }
     return true;
 }
@@ -721,11 +721,11 @@ bool tud_audio_tx_done_post_load_cb(uint8_t rhport, uint16_t n_bytes_copied, uin
     (void) ep_in;
     (void) cur_alt_setting;
 
-    size_t  n_bytes = (*usb_get_data)(data_in_buf, data_in_buf_cnt) ;
+    size_t  n_bytes = (*usb_get_data)(data_in_buf, data_in_buf_n_bytes) ;
 
-    if(n_bytes != data_in_buf_cnt)
-        ESP_LOGI(TAG,"Requested %d bytes, got %d bytes\n",data_in_buf_cnt,n_bytes );
-    //TU_ASSERT((n_bytes == data_in_buf_cnt));
+    if(n_bytes != data_in_buf_n_bytes)
+        ESP_LOGI(TAG,"Requested %d bytes, got %d bytes\n",data_in_buf_n_bytes,n_bytes );
+    //TU_ASSERT((n_bytes == data_in_buf_n_bytes));
 
 #ifdef DISPLAY_STATS
     mic_bytes_available_ary[n_bytes]++;

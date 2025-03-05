@@ -6,6 +6,8 @@
 
 char *TAG = "utilities";
 
+uint32_t micros(); // defined in blink_led.c
+
 int32_t q31_multiply(int32_t a, int32_t b){
     // Q31 format numbers are assumed to be in 1.31 format (ranges from -1 to 0.99999)
     // Multiplication is usual operation. However the result is in 2.62 format and requires 
@@ -76,6 +78,7 @@ struct tx_data_info
 } typedef txPacketInfo;
 
 QueueHandle_t txInfoQ;
+#define NUM_Q_ITEMS 1024
 
 // Task to create a queue and post a value.
 void txInfoQinit( )
@@ -83,7 +86,7 @@ void txInfoQinit( )
 
  // Create a queue capable of containing 1024 txPacketInfo
  // These should be passed by pointer as they contain a lot of data.
- txInfoQ = xQueueCreate( 1024, sizeof( struct tx_data_info ) );
+ txInfoQ = xQueueCreate( NUM_Q_ITEMS, sizeof( struct tx_data_info ) );
  if( txInfoQ == 0 )
  {
      ESP_LOGE(TAG,"Failed to create Queue");
@@ -110,7 +113,7 @@ void put_txPacketInfo(txPacketInfo *data)
 void print_txPacketInfo(size_t n_items){
  char buf[sizeof(txPacketInfo)];
  txPacketInfo *p;
-    if(n_items == 0) n_items = 1024;
+    if(n_items == 0) n_items = NUM_Q_ITEMS;
     printf("==== Tx packets info =====\n");
     printf("  timestamp : n_bytes \n");
     for(size_t i=0; i<n_items; i++){
@@ -126,11 +129,8 @@ void print_txPacketInfo(size_t n_items){
 
 
 void log_txbytes(size_t n_bytes){
-    struct timeval tv_now;
-    gettimeofday(&tv_now, NULL);
-    int64_t time_us = (int64_t)tv_now.tv_sec * 1000000L + (int64_t)tv_now.tv_usec;
     txPacketInfo s;
-    s.timestamp = time_us; //esp_log_timestamp();
+    s.timestamp = micros();
     s.n_bytes = n_bytes;
     put_txPacketInfo(&s);
 }
